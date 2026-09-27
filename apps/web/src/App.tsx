@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
+import { ChatPage } from "./pages/Chat";
 import { LoginPage } from "./pages/Login";
 import { SettingsPage } from "./pages/Settings";
 
 export function App() {
   const [username, setUsername] = useState<string | null | undefined>(undefined);
-  const [page, setPage] = useState<"home" | "settings">("settings");
+  const [page, setPage] = useState<"chat" | "settings">("chat");
 
   async function refresh() {
     const res = await fetch("/api/me", { credentials: "include" });
@@ -22,6 +23,9 @@ export function App() {
     <main style={{ maxWidth: 720, margin: "2rem auto", fontFamily: "sans-serif" }}>
       <header style={{ display: "flex", gap: 12, alignItems: "center" }}>
         <strong>AI Gateway</strong>
+        <button type="button" onClick={() => setPage("chat")}>
+          聊天
+        </button>
         <button type="button" onClick={() => setPage("settings")}>
           设置
         </button>
@@ -35,7 +39,7 @@ export function App() {
           退出
         </button>
       </header>
-      {page === "settings" ? <SettingsPage /> : <p>聊天将在后续里程碑接入。</p>}
+      {page === "settings" ? <SettingsPage /> : <ChatPage />}
     </main>
   );
 }

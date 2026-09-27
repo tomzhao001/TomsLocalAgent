@@ -32,8 +32,15 @@ export function openDatabase(path: string): DatabaseSync {
     CREATE TABLE IF NOT EXISTS runs (
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL,
+      session_id TEXT,
       status TEXT NOT NULL,
       created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS workspace_locks (
+      workspace_id TEXT PRIMARY KEY,
+      holder_type TEXT NOT NULL,
+      holder_id TEXT NOT NULL,
+      acquired_at INTEGER NOT NULL
     );
     CREATE TRIGGER IF NOT EXISTS chat_sessions_workspace_immutable
     BEFORE UPDATE OF workspace_id ON chat_sessions
@@ -41,5 +48,13 @@ export function openDatabase(path: string): DatabaseSync {
       SELECT RAISE(ABORT, 'workspace_id is immutable');
     END;
   `);
+  ensureColumn(db, "runs", "session_id", "TEXT");
   return db;
+}
+
+function ensureColumn(db: DatabaseSync, table: string, column: string, type: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!columns.some((item) => item.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
 }
