@@ -12,6 +12,7 @@ export function ChatPage() {
   const [provider, setProvider] = useState("cursor");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [model, setModel] = useState("");
   const [lines, setLines] = useState<string[]>([]);
   const [error, setError] = useState("");
 
@@ -69,7 +70,7 @@ export function ChatPage() {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt: text, model: "fake" }),
+      body: JSON.stringify({ prompt: text, model: model || "auto" }),
     });
     const body = (await res.json()) as { runId?: string; message?: string };
     if (!res.ok || !body.runId) {
@@ -89,7 +90,8 @@ export function ChatPage() {
         offset = payload.nextOffset;
       }
       if (payload.status !== "running") break;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      if (document.visibilityState === "hidden") break;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
 
@@ -126,13 +128,14 @@ export function ChatPage() {
           </li>
         ))}
       </ul>
-      {sessionId ? <p>当前聊天已绑定 workspace，不能再改。</p> : null}
+      {sessionId ? <p>当前聊天已绑定 workspace 和模式，不能再改。</p> : null}
       <div>
         {lines.map((line, index) => (
           <p key={index}>{line}</p>
         ))}
       </div>
       <form onSubmit={(event) => void send(event)}>
+        <input name="model" value={model} placeholder="模型" onChange={(e) => setModel(e.target.value)} />
         <input name="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
         <button type="submit" disabled={!sessionId}>
           发送

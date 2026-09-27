@@ -14,8 +14,11 @@ export type RunContext = {
   cwd: string;
 };
 
+export type RunTerminal = "finished" | "error" | "cancelled";
+
 export type AgentRuntime = {
-  startRun(input: RunContext, emit: (event: GatewayEvent) => void): Promise<void>;
+  startRun(input: RunContext, emit: (event: GatewayEvent) => void, signal?: AbortSignal): Promise<RunTerminal | void>;
+  listModels?: () => Promise<{ id: string; label: string }[]>;
 };
 
 export function createFakeRuntime(): AgentRuntime {
@@ -32,18 +35,20 @@ export function createFakeRuntime(): AgentRuntime {
 export function registerRuns(
   app: FastifyInstance,
   db: DatabaseSync,
-  options: { logDir: string; runtime: AgentRuntime | null },
+  options: { logDir: string; runtime: AgentRuntime | null; runtimes?: Partial<Record<string, AgentRuntime>> },
 ): WorkspaceLockManager {
   const locks = new WorkspaceLockManager(db);
   locks.clearStale();
+  const controllers = new Map<string, AbortController>();
 
   app.post("/api/sessions/:id/messages", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const session = db.prepare("SELECT id, workspace_id FROM chat_sessions WHERE id = ?").get(id) as
-      | { id: string; workspace_id: string }
+    const session = db.prepare("SELECT id, workspace_id, provider FROM chat_sessions WHERE id = ?").get(id) as
+      | { id: string; workspace_id: string; provider: string }
       | undefined;
     if (!session) return reply.code(404).send({ error: "not_found", message: "聊天不存在" });
-    if (!options.runtime) return reply.code(501).send({ error: "no_runtime", message: "当前没有可用的 agent" });
+    const runtime = options.runtimes?.[session.provider] ?? options.runtime;
+    if (!runtime) return reply.code(501).send({ error: "no_runtime", message: "当前没有可用的 agent" });
     const body = request.body as { prompt?: string; model?: string };
     if (!body.prompt?.trim()) return reply.code(400).send({ error: "invalid", message: "prompt 必填" });
 
@@ -57,25 +62,25 @@ export function registerRuns(
         holder: acquired.holder,
       });
     }
-    db.prepare("INSERT INTO runs (id, workspace_id, session_id, status, created_at) VALUES (?, ?, ?, 'running', ?)").run(
-      runId,
-      session.workspace_id,
-      session.id,
-      Date.now(),
-    );
+    const model = body.model ?? "";
+    db.prepare(
+      "INSERT INTO runs (id, workspace_id, session_id, status, model, created_at) VALUES (?, ?, ?, 'running', ?, ?)",
+    ).run(runId, session.workspace_id, session.id, model, Date.now());
     const file = logFile(options.logDir, session.id, runId);
     const ctx: RunContext = {
       sessionId: session.id,
       runId,
       workspaceId: session.workspace_id,
       prompt: body.prompt,
-      model: body.model ?? "",
+      model,
       cwd: workspace.path,
     };
-    void options.runtime
-      .startRun(ctx, (event) => appendLog(file, event))
-      .then(() => {
-        if (dbOpen(db)) db.prepare("UPDATE runs SET status = 'finished' WHERE id = ?").run(runId);
+    const controller = new AbortController();
+    controllers.set(runId, controller);
+    void runtime
+      .startRun(ctx, (event) => appendLog(file, event), controller.signal)
+      .then((status) => {
+        if (dbOpen(db)) db.prepare("UPDATE runs SET status = ? WHERE id = ?").run(status ?? "finished", runId);
       })
       .catch(() => {
         if (!dbOpen(db)) return;
@@ -83,9 +88,25 @@ export function registerRuns(
         db.prepare("UPDATE runs SET status = 'error' WHERE id = ?").run(runId);
       })
       .finally(() => {
+        controllers.delete(runId);
         if (dbOpen(db)) locks.release(session.workspace_id, runId);
       });
     return reply.code(202).send({ runId });
+  });
+
+  app.post("/api/runs/:id/cancel", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const controller = controllers.get(id);
+    if (!controller) return reply.code(409).send({ error: "not_running", message: "这个运行已经结束" });
+    controller.abort();
+    return { ok: true };
+  });
+
+  app.get("/api/providers/:id/models", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const runtime = options.runtimes?.[id] ?? options.runtime;
+    if (!runtime?.listModels) return reply.code(404).send({ error: "not_found", message: "没有这个 provider" });
+    return runtime.listModels();
   });
 
   app.get("/api/sessions", async () => {

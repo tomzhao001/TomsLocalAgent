@@ -33,6 +33,7 @@ export function openDatabase(path: string): DatabaseSync {
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL,
       session_id TEXT,
+      model TEXT,
       status TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
@@ -49,6 +50,7 @@ export function openDatabase(path: string): DatabaseSync {
     END;
   `);
   ensureColumn(db, "runs", "session_id", "TEXT");
+  ensureColumn(db, "runs", "model", "TEXT");
   return db;
 }
 

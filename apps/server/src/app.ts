@@ -12,6 +12,7 @@ export type AppOptions = {
   logDir?: string;
   agentRuntime?: "fake";
   runtime?: AgentRuntime | null;
+  runtimes?: Partial<Record<string, AgentRuntime>>;
 };
 
 export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
@@ -30,7 +31,7 @@ export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
     await registerWorkspaces(app, db, options.workspaceRoots ?? []);
     const runtime =
       options.runtime ?? (options.agentRuntime === "fake" ? createFakeRuntime() : null);
-    registerRuns(app, db, { logDir: options.logDir ?? "data/logs", runtime });
+    registerRuns(app, db, { logDir: options.logDir ?? "data/logs", runtime, runtimes: options.runtimes });
   }
 
   return app;

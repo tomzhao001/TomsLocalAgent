@@ -1,5 +1,6 @@
 FROM node:22-bookworm
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+RUN npm install -g opencode-ai@1.18.32
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 COPY packages ./packages
