@@ -44,7 +44,7 @@ export function WorkflowBoard(props: {
       <Card>
         <CardContent>
           <div className="h-[420px]">
-            <ReactFlow colorMode="dark" nodes={nodes} edges={edges} fitView />
+            <ReactFlow colorMode="light" nodes={nodes} edges={edges} fitView />
           </div>
         </CardContent>
       </Card>
