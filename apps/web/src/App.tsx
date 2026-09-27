@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { WorkflowBoard } from "./components/WorkflowBoard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { ChatPage } from "./pages/Chat";
 import { LoginPage } from "./pages/Login";
 import { SettingsPage } from "./pages/Settings";
@@ -18,51 +21,80 @@ export function App() {
     void refresh();
   }, []);
 
-  if (username === undefined) return <p>加载中…</p>;
+  if (username === undefined) return <p className="p-8 text-sm text-muted-foreground">加载中…</p>;
   if (!username) return <LoginPage onLoggedIn={(name) => setUsername(name)} />;
 
   return (
-    <main style={{ maxWidth: 720, margin: "2rem auto", fontFamily: "sans-serif" }}>
-      <header style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        <strong>AI Gateway</strong>
-        <button type="button" onClick={() => setPage("chat")}>
+    <div className="flex min-h-svh flex-col">
+      <header className="flex items-center gap-2 border-b px-4 py-3">
+        <strong className="mr-2 text-sm">AI Gateway</strong>
+        <Button type="button" size="sm" variant={page === "chat" ? "default" : "ghost"} onClick={() => setPage("chat")}>
           聊天
-        </button>
-        <button type="button" onClick={() => setPage("workflow")}>
-          工作流
-        </button>
-        <button type="button" onClick={() => setPage("settings")}>
-          设置
-        </button>
-        <span style={{ marginLeft: "auto" }}>{username}</span>
-        <button
+        </Button>
+        <Button
           type="button"
+          size="sm"
+          variant={page === "workflow" ? "default" : "ghost"}
+          onClick={() => setPage("workflow")}
+        >
+          工作流
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={page === "settings" ? "default" : "ghost"}
+          onClick={() => setPage("settings")}
+        >
+          设置
+        </Button>
+        <Separator orientation="vertical" className="mx-1 h-5" />
+        <Badge variant="secondary" className="ml-auto">
+          {username}
+        </Badge>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
           onClick={() => {
             void fetch("/api/logout", { method: "POST", credentials: "include" }).then(() => setUsername(null));
           }}
         >
           退出
-        </button>
+        </Button>
       </header>
-      {page === "settings" ? <SettingsPage /> : null}
-      {page === "chat" ? <ChatPage /> : null}
-      {page === "workflow" ? (
-        <section>
-          <button type="button" onClick={() => setFlowStatus("running")}>
-            运行中
-          </button>
-          <button type="button" onClick={() => setFlowStatus("waiting_input")}>
-            等待输入
-          </button>
-          <WorkflowBoard
-            status={flowStatus}
-            phase={flowStatus === "running" ? "develop" : "arch"}
-            archRejects={flowStatus === "waiting_input" ? 4 : 1}
-            qaRejects={0}
-            holder={flowStatus === "running" ? "工作流 #12" : undefined}
-          />
-        </section>
-      ) : null}
-    </main>
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col p-4">
+        {page === "settings" ? <SettingsPage /> : null}
+        {page === "chat" ? <ChatPage /> : null}
+        {page === "workflow" ? (
+          <section className="flex flex-col gap-3">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={flowStatus === "running" ? "default" : "outline"}
+                onClick={() => setFlowStatus("running")}
+              >
+                运行中
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={flowStatus === "waiting_input" ? "default" : "outline"}
+                onClick={() => setFlowStatus("waiting_input")}
+              >
+                等待输入
+              </Button>
+            </div>
+            <WorkflowBoard
+              status={flowStatus}
+              phase={flowStatus === "running" ? "develop" : "arch"}
+              archRejects={flowStatus === "waiting_input" ? 4 : 1}
+              qaRejects={0}
+              holder={flowStatus === "running" ? "工作流 #12" : undefined}
+            />
+          </section>
+        ) : null}
+      </main>
+    </div>
   );
 }

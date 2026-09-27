@@ -1,4 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 
 type Workspace = { id: string; name: string; archived: boolean };
 type Session = { id: string; provider: string; workspace_id: string; workspace_name: string; title: string | null };
@@ -96,52 +105,90 @@ export function ChatPage() {
   }
 
   return (
-    <section>
-      <h2>聊天</h2>
-      <label>
-        Workspace
-        <select value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
-          <option value="">请选择</option>
-          {workspaces.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        模式
-        <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-          <option value="cursor">Cursor</option>
-          <option value="opencode">OpenCode</option>
-        </select>
-      </label>
-      <button type="button" onClick={() => void createSession()} disabled={!workspaceId}>
-        新建聊天
-      </button>
-      <ul>
-        {sessions.map((item) => (
-          <li key={item.id}>
-            <button type="button" onClick={() => void openSession(item.id)}>
-              {item.workspace_name} / {item.provider}
-            </button>
-          </li>
-        ))}
-      </ul>
-      {sessionId ? <p>当前聊天已绑定 workspace 和模式，不能再改。</p> : null}
-      <div>
-        {lines.map((line, index) => (
-          <p key={index}>{line}</p>
-        ))}
-      </div>
-      <form onSubmit={(event) => void send(event)}>
-        <input name="model" value={model} placeholder="模型" onChange={(e) => setModel(e.target.value)} />
-        <input name="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-        <button type="submit" disabled={!sessionId}>
-          发送
-        </button>
-      </form>
-      {error ? <p role="alert">{error}</p> : null}
+    <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
+      <Card className="min-h-0">
+        <CardHeader>
+          <CardTitle>聊天</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="grid gap-2">
+            <Label>Workspace</Label>
+            <Select value={workspaceId} onValueChange={setWorkspaceId}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="请选择" />
+              </SelectTrigger>
+              <SelectContent>
+                {workspaces.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label>模式</Label>
+            <Select value={provider} onValueChange={setProvider}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="cursor">Cursor</SelectItem>
+                <SelectItem value="opencode">OpenCode</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button type="button" onClick={() => void createSession()} disabled={!workspaceId}>
+            新建聊天
+          </Button>
+          <Separator />
+          <ScrollArea className="h-64">
+            <ul className="flex flex-col gap-1 pr-3">
+              {sessions.map((item) => (
+                <li key={item.id}>
+                  <Button
+                    type="button"
+                    variant={sessionId === item.id ? "secondary" : "ghost"}
+                    className="h-auto w-full justify-start px-2 py-1.5 whitespace-normal"
+                    onClick={() => void openSession(item.id)}
+                  >
+                    {item.workspace_name} / {item.provider}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
+        </CardContent>
+      </Card>
+      <Card className="flex min-h-[32rem] flex-col">
+        <CardHeader>
+          <CardTitle>消息</CardTitle>
+          {sessionId ? <CardDescription>当前聊天已绑定 workspace 和模式，不能再改。</CardDescription> : null}
+        </CardHeader>
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+          <ScrollArea className="min-h-48 flex-1 rounded-lg border">
+            <div className="flex flex-col gap-3 p-3">
+              {lines.map((line, index) => (
+                <p key={index} className="text-sm leading-6">
+                  {line}
+                </p>
+              ))}
+            </div>
+          </ScrollArea>
+          <form className="flex flex-col gap-2" onSubmit={(event) => void send(event)}>
+            <Input name="model" value={model} placeholder="模型" onChange={(e) => setModel(e.target.value)} />
+            <Textarea name="prompt" value={prompt} placeholder="输入消息" onChange={(e) => setPrompt(e.target.value)} />
+            <Button type="submit" className="self-end" disabled={!sessionId}>
+              发送
+            </Button>
+          </form>
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+        </CardContent>
+      </Card>
     </section>
   );
 }

@@ -1,4 +1,9 @@
 import { useState, type FormEvent } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export function LoginPage({ onLoggedIn }: { onLoggedIn: (username: string) => void }) {
   const [password, setPassword] = useState("");
@@ -22,25 +27,33 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (username: string) => vo
   }
 
   return (
-    <main style={{ maxWidth: 360, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>AI Gateway</h1>
-      <form onSubmit={(event) => void onSubmit(event)}>
-        <label>
-          管理员密码
-          <input
-            type="password"
-            name="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            style={{ display: "block", width: "100%", marginTop: 8 }}
-          />
-        </label>
-        <button type="submit" style={{ marginTop: 16 }}>
-          登录
-        </button>
-        {error ? <p role="alert">{error}</p> : null}
-      </form>
+    <main className="flex min-h-svh items-center justify-center p-6">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle>AI Gateway</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form className="flex flex-col gap-4" onSubmit={(event) => void onSubmit(event)}>
+            <div className="grid gap-2">
+              <Label htmlFor="password">管理员密码</Label>
+              <Input
+                id="password"
+                type="password"
+                name="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+              />
+            </div>
+            {error ? (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+            <Button type="submit">登录</Button>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }

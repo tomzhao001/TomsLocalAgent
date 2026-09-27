@@ -1,5 +1,10 @@
 import { ReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { Alert, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
 const labels: Record<string, string> = {
   develop: "开发",
@@ -30,24 +35,36 @@ export function WorkflowBoard(props: {
   ];
 
   return (
-    <section>
-      {props.holder ? <p role="status">占用中：{props.holder}</p> : null}
-      <div style={{ height: 420 }}>
-        <ReactFlow nodes={nodes} edges={edges} fitView />
-      </div>
+    <section className="flex flex-col gap-3">
+      {props.holder ? (
+        <Badge variant="secondary" role="status">
+          占用中：{props.holder}
+        </Badge>
+      ) : null}
+      <Card>
+        <CardContent>
+          <div className="h-[420px]">
+            <ReactFlow colorMode="dark" nodes={nodes} edges={edges} fitView />
+          </div>
+        </CardContent>
+      </Card>
       {props.status === "waiting_input" ? (
-        <form
-          role="alert"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const text = String(new FormData(event.currentTarget).get("note") ?? "");
-            props.onContinue?.(text);
-          }}
-        >
-          <p>流程暂停，等待你的输入</p>
-          <input name="note" aria-label="继续说明" />
-          <button type="submit">继续修改</button>
-        </form>
+        <Alert>
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const text = String(new FormData(event.currentTarget).get("note") ?? "");
+              props.onContinue?.(text);
+            }}
+          >
+            <AlertTitle>流程暂停，等待你的输入</AlertTitle>
+            <div className="flex gap-2">
+              <Input name="note" aria-label="继续说明" />
+              <Button type="submit">继续修改</Button>
+            </div>
+          </form>
+        </Alert>
       ) : null}
     </section>
   );

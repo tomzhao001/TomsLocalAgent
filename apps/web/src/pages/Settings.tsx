@@ -1,4 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type Workspace = {
   id: string;
@@ -89,42 +94,60 @@ export function SettingsPage() {
   }
 
   return (
-    <section>
-      <h2>Workspace</h2>
-      <form onSubmit={(event) => void create(event)}>
-        <label>
-          名称
-          <input name="name" value={name} onChange={(e) => setName(e.target.value)} required />
-        </label>
-        <label>
-          路径
-          <input name="path" value={path} onChange={(e) => setPath(e.target.value)} required />
-        </label>
-        <button type="submit">添加</button>
-      </form>
-      {error ? <p role="alert">{error}</p> : null}
-      <ul>
+    <section className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Workspace</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end" onSubmit={(event) => void create(event)}>
+            <div className="grid gap-2">
+              <Label htmlFor="workspace-name">名称</Label>
+              <Input id="workspace-name" name="name" value={name} onChange={(e) => setName(e.target.value)} required />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="workspace-path">路径</Label>
+              <Input id="workspace-path" name="path" value={path} onChange={(e) => setPath(e.target.value)} required />
+            </div>
+            <Button type="submit">添加</Button>
+          </form>
+        </CardContent>
+      </Card>
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="grid gap-3">
         {items.map((item) => (
-          <li key={item.id}>
-            <strong>{item.name}</strong>
-            {item.archived ? "（已归档）" : ""}
-            <div>{item.path}</div>
-            <div>仓库：{item.repos.length === 0 ? "无" : item.repos.join("，")}</div>
-            <button type="button" onClick={() => void rename(item)}>
-              改名
-            </button>
-            <button type="button" onClick={() => void scan(item)}>
-              重新扫描
-            </button>
-            <button type="button" onClick={() => void archive(item)}>
-              归档
-            </button>
-            <button type="button" onClick={() => void remove(item)}>
-              删除
-            </button>
-          </li>
+          <Card key={item.id} size="sm">
+            <CardHeader>
+              <CardTitle>
+                {item.name}
+                {item.archived ? "（已归档）" : ""}
+              </CardTitle>
+              <CardDescription>{item.path}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">仓库：{item.repos.length === 0 ? "无" : item.repos.join("，")}</p>
+            </CardContent>
+            <CardFooter className="gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => void rename(item)}>
+                改名
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => void scan(item)}>
+                重新扫描
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => void archive(item)}>
+                归档
+              </Button>
+              <Button type="button" size="sm" variant="destructive" onClick={() => void remove(item)}>
+                删除
+              </Button>
+            </CardFooter>
+          </Card>
         ))}
-      </ul>
+      </div>
     </section>
   );
 }
