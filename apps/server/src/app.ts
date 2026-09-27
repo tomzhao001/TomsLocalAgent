@@ -1,11 +1,13 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { openDatabase } from "./db.js";
 import { registerAuth } from "./auth.js";
+import { registerWorkspaces } from "./workspaces.js";
 
 export type AppOptions = {
   dbPath: string;
   adminPassword: string;
   cookieSecure?: boolean;
+  workspaceRoots?: string[];
 };
 
 export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
@@ -21,6 +23,7 @@ export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
       adminPassword: options.adminPassword,
       cookieSecure: options.cookieSecure !== false,
     });
+    await registerWorkspaces(app, db, options.workspaceRoots ?? []);
   }
 
   return app;

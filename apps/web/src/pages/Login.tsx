@@ -1,23 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 
-export function LoginPage() {
+export function LoginPage({ onLoggedIn }: { onLoggedIn: (username: string) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [username, setUsername] = useState<string | null>(null);
-
-  async function refreshMe() {
-    const res = await fetch("/api/me", { credentials: "include" });
-    if (!res.ok) {
-      setUsername(null);
-      return;
-    }
-    const body = (await res.json()) as { username: string };
-    setUsername(body.username);
-  }
-
-  useEffect(() => {
-    void refreshMe();
-  }, []);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -32,24 +17,8 @@ export function LoginPage() {
       setError(res.status === 429 ? "尝试次数过多，请稍后再试" : "密码不正确");
       return;
     }
-    await refreshMe();
-  }
-
-  async function logout() {
-    await fetch("/api/logout", { method: "POST", credentials: "include" });
-    setUsername(null);
-  }
-
-  if (username) {
-    return (
-      <main style={{ maxWidth: 360, margin: "4rem auto", fontFamily: "sans-serif" }}>
-        <h1>AI Gateway</h1>
-        <p>已登录：{username}</p>
-        <button type="button" onClick={() => void logout()}>
-          退出
-        </button>
-      </main>
-    );
+    const body = (await res.json()) as { username: string };
+    onLoggedIn(body.username);
   }
 
   return (

@@ -221,6 +221,7 @@ __marimo__/
 node_modules
 .env
 data
+/workspaces
 *.tsbuildinfo
 coverage
 .pnpm-store
