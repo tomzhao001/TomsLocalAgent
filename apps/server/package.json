@@ -10,7 +10,9 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
     "@gateway/shared": "workspace:*",
+    "argon2": "^0.45.1",
     "fastify": "^5.6.1"
   },
   "devDependencies": {
