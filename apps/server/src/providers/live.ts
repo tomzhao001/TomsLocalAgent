@@ -18,12 +18,19 @@ export async function loadCursorRuntime(apiKey: string, memory: Memory): Promise
   return { ...cursor, listModels: models };
 }
 
-export async function loadOpenCodeRuntime(): Promise<AgentRuntime> {
+export type OpenCodeHandle = { runtime: AgentRuntime; close: () => void };
+
+export async function loadOpenCodeRuntime(options: { port: number; password?: string }): Promise<OpenCodeHandle> {
   const sdk = (await import("@opencode-ai/sdk")) as any;
-  const started = await sdk.createOpencode({ hostname: "127.0.0.1", port: 4096 });
-  const client = started.client;
+  const server = await sdk.createOpencodeServer({ hostname: "127.0.0.1", port: options.port, timeout: 20_000 });
+  const headers: Record<string, string> = {};
+  if (options.password) {
+    const user = process.env.OPENCODE_SERVER_USERNAME || "opencode";
+    headers.Authorization = `Basic ${Buffer.from(`${user}:${options.password}`).toString("base64")}`;
+  }
+  const client = sdk.createOpencodeClient({ baseUrl: server.url, headers });
   const sessions = new Map<string, string>();
-  return createOpenCodeRuntime({
+  const runtime = createOpenCodeRuntime({
     models: [],
     async prompt(input) {
       const [providerID, modelID] = splitModel(input.model);
@@ -53,6 +60,7 @@ export async function loadOpenCodeRuntime(): Promise<AgentRuntime> {
       return id;
     },
   });
+  return { runtime, close: () => server.close() };
 }
 
 function adapt(sdk: any, apiKey: string): CursorSdk {

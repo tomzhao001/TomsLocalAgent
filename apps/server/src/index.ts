@@ -1,39 +1,65 @@
-import { delimiter } from "node:path";
+import { mkdirSync } from "node:fs";
 import { buildApp } from "./app.js";
-import { loadCursorRuntime, loadOpenCodeRuntime } from "./providers/live.js";
+import { applyEnvFile, loadConfig } from "./config.js";
+import { loadCursorRuntime, loadOpenCodeRuntime, type OpenCodeHandle } from "./providers/live.js";
 import type { AgentRuntime } from "./runs.js";
 
-const port = Number(process.env.PORT ?? 3000);
-const host = process.env.HOST ?? "0.0.0.0";
-const dataDir = process.env.DATA_DIR ?? "data";
-const dbPath = `${dataDir}/gateway.db`;
-const adminPassword = process.env.ADMIN_PASSWORD ?? "";
-if (!adminPassword) {
-  throw new Error("ADMIN_PASSWORD is required");
-}
+const config = loadConfig();
+applyEnvFile(config);
+mkdirSync(config.logDir, { recursive: true });
 
 const runtimes: Partial<Record<string, AgentRuntime>> = {};
 const memory = new Map<string, string>();
-if (process.env.AGENT_RUNTIME !== "fake" && process.env.CURSOR_API_KEY) {
-  runtimes.cursor = await loadCursorRuntime(process.env.CURSOR_API_KEY, {
+let opencode: OpenCodeHandle | null = null;
+
+if (!config.fakeRuntime && config.cursorApiKey) {
+  runtimes.cursor = await loadCursorRuntime(config.cursorApiKey, {
     get: (id) => memory.get(id) ?? null,
     set: (id, agentId) => memory.set(id, agentId),
   });
 }
-if (process.env.AGENT_RUNTIME !== "fake" && process.env.OPENCODE_ENABLE === "true") {
-  runtimes.opencode = await loadOpenCodeRuntime();
+if (!config.fakeRuntime && config.opencode.enabled) {
+  if (config.opencode.password) process.env.OPENCODE_SERVER_PASSWORD = config.opencode.password;
+  try {
+    opencode = await loadOpenCodeRuntime({ port: config.opencode.port, password: config.opencode.password });
+  } catch (error) {
+    console.error(`OpenCode 服务启动失败（端口 ${config.opencode.port}）：${(error as Error).message}`);
+    process.exit(1);
+  }
+  runtimes.opencode = opencode.runtime;
 }
 
 const app = await buildApp({
-  dbPath,
-  adminPassword,
-  cookieSecure: process.env.COOKIE_SECURE === "true",
-  workspaceRoots: (process.env.WORKSPACE_ROOTS ?? "")
-    .split(delimiter)
-    .map((item) => item.trim())
-    .filter(Boolean),
-  logDir: `${dataDir}/logs`,
-  agentRuntime: process.env.AGENT_RUNTIME === "fake" ? "fake" : undefined,
+  dbPath: config.dbPath,
+  adminPassword: config.adminPassword,
+  cookieSecure: config.cookieSecure,
+  workspaceRoots: config.workspaceRoots,
+  logDir: config.logDir,
+  webDir: config.webDir,
+  agentRuntime: config.fakeRuntime ? "fake" : undefined,
   runtimes,
 });
-await app.listen({ port, host });
+
+let closing = false;
+async function shutdown(signal: string) {
+  if (closing) return;
+  closing = true;
+  console.log(`收到 ${signal}，正在退出`);
+  opencode?.close();
+  await app.close();
+  process.exit(0);
+}
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+try {
+  await app.listen({ port: config.port, host: config.host });
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+    console.error(`端口 ${config.port} 已被占用。请先运行 status 查看，或运行 stop 停掉旧进程。`);
+    opencode?.close();
+    process.exit(1);
+  }
+  throw error;
+}
+console.log(`Gateway 已启动：http://${config.host}:${config.port}（数据目录 ${config.dataDir}）`);

@@ -2,8 +2,11 @@
   "name": "@gateway/server",
   "version": "0.0.1",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --conditions=development src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -12,10 +15,12 @@
   "dependencies": {
     "@cursor/sdk": "^1.0.32",
     "@fastify/cookie": "^11.1.2",
+    "@fastify/static": "^10.1.5",
     "@gateway/shared": "workspace:*",
     "@opencode-ai/sdk": "1.18.32",
     "argon2": "^0.45.1",
     "fastify": "^5.6.1",
+    "opencode-ai": "1.18.32",
     "zod": "^3.25.76"
   },
   "devDependencies": {

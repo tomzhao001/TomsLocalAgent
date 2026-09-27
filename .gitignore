@@ -220,9 +220,10 @@ __marimo__/
 # Node / AI Gateway
 node_modules
 .env
-scripts/deploy.env
+/dist
 data
 /workspaces
+apps/server/public
 *.tsbuildinfo
 coverage
 .pnpm-store
