@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
+import { WorkflowBoard } from "./components/WorkflowBoard";
 import { ChatPage } from "./pages/Chat";
 import { LoginPage } from "./pages/Login";
 import { SettingsPage } from "./pages/Settings";
 
 export function App() {
   const [username, setUsername] = useState<string | null | undefined>(undefined);
-  const [page, setPage] = useState<"chat" | "settings">("chat");
+  const [page, setPage] = useState<"chat" | "settings" | "workflow">("chat");
+  const [flowStatus, setFlowStatus] = useState<"running" | "waiting_input">("running");
 
   async function refresh() {
     const res = await fetch("/api/me", { credentials: "include" });
@@ -26,6 +28,9 @@ export function App() {
         <button type="button" onClick={() => setPage("chat")}>
           聊天
         </button>
+        <button type="button" onClick={() => setPage("workflow")}>
+          工作流
+        </button>
         <button type="button" onClick={() => setPage("settings")}>
           设置
         </button>
@@ -39,7 +44,25 @@ export function App() {
           退出
         </button>
       </header>
-      {page === "settings" ? <SettingsPage /> : <ChatPage />}
+      {page === "settings" ? <SettingsPage /> : null}
+      {page === "chat" ? <ChatPage /> : null}
+      {page === "workflow" ? (
+        <section>
+          <button type="button" onClick={() => setFlowStatus("running")}>
+            运行中
+          </button>
+          <button type="button" onClick={() => setFlowStatus("waiting_input")}>
+            等待输入
+          </button>
+          <WorkflowBoard
+            status={flowStatus}
+            phase={flowStatus === "running" ? "develop" : "arch"}
+            archRejects={flowStatus === "waiting_input" ? 4 : 1}
+            qaRejects={0}
+            holder={flowStatus === "running" ? "工作流 #12" : undefined}
+          />
+        </section>
+      ) : null}
     </main>
   );
 }
