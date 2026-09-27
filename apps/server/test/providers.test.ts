@@ -6,7 +6,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { createCursorRuntime, type CursorSdk } from "../src/providers/cursor.js";
 import { createOpenCodeRuntime } from "../src/providers/opencode.js";
-import { cachedModels, classifyCursorFailure, mapCursorEvent, takeOpencodePart } from "../src/providers/map.js";
+import { cachedModels, classifyCursorFailure, flattenOpenCodeModels, mapCursorEvent, takeOpencodePart } from "../src/providers/map.js";
 import type { AgentRuntime } from "../src/runs.js";
 
 describe("SDK 事件映射", () => {
@@ -36,6 +36,22 @@ describe("SDK 事件映射", () => {
     };
     expect(takeOpencodePart(seen, event)).toEqual({ type: "text", text: "甲" });
     expect(takeOpencodePart(seen, event)).toBeNull();
+  });
+
+  it("把 OpenCode provider 摊成 provider/model", () => {
+    expect(
+      flattenOpenCodeModels({
+        providers: [
+          { id: "openai", name: "OpenAI", models: { "gpt-4": { name: "GPT-4" }, mini: {} } },
+          { name: "opencode", models: { auto: { name: "Auto" } } },
+        ],
+      }),
+    ).toEqual([
+      { id: "openai/gpt-4", label: "GPT-4" },
+      { id: "openai/mini", label: "openai/mini" },
+      { id: "opencode/auto", label: "Auto" },
+    ]);
+    expect(flattenOpenCodeModels({ data: { providers: [] } })).toEqual([]);
   });
 
   it("模型列表缓存 10 分钟", async () => {

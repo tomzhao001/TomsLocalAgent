@@ -65,6 +65,28 @@ export function takeOpencodePart(seen: Set<string>, event: { type?: string; prop
 
 export type ModelInfo = { id: string; label: string };
 
+export type OpenCodeProviderConfig = {
+  id?: string;
+  name?: string;
+  models?: Record<string, { name?: string } | undefined>;
+};
+
+export function flattenOpenCodeModels(config: {
+  providers?: OpenCodeProviderConfig[];
+  data?: { providers?: OpenCodeProviderConfig[] };
+} | null | undefined): ModelInfo[] {
+  const providers = config?.providers ?? config?.data?.providers ?? [];
+  const items: ModelInfo[] = [];
+  for (const provider of providers) {
+    const providerID = provider.id || provider.name;
+    if (!providerID) continue;
+    for (const [modelID, model] of Object.entries(provider.models ?? {})) {
+      items.push({ id: `${providerID}/${modelID}`, label: model?.name ?? `${providerID}/${modelID}` });
+    }
+  }
+  return items;
+}
+
 export function cachedModels(load: () => Promise<ModelInfo[]>, ttlMs = 10 * 60 * 1000, now = () => Date.now()) {
   let cache: { at: number; models: ModelInfo[] } | null = null;
   return async () => {

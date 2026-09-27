@@ -74,6 +74,8 @@ describe("运行、日志与锁", () => {
     const sent = await authed("POST", `/api/sessions/${sessionId}/messages`, { prompt: "你好", model: "fake" });
     expect(sent.statusCode).toBe(202);
     const runId = sent.json().runId as string;
+    const runs = await authed("GET", `/api/sessions/${sessionId}/runs`);
+    expect(runs.json()).toEqual([expect.objectContaining({ id: runId, prompt: "你好" })]);
     const early = await authed("GET", `/api/runs/${runId}/log?offset=0`);
     expect(early.json().events).toEqual([]);
 

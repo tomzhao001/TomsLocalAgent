@@ -51,6 +51,7 @@ export function openDatabase(path: string): DatabaseSync {
   `);
   ensureColumn(db, "runs", "session_id", "TEXT");
   ensureColumn(db, "runs", "model", "TEXT");
+  ensureColumn(db, "runs", "prompt", "TEXT");
   return db;
 }
 

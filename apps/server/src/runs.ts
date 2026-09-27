@@ -64,8 +64,8 @@ export function registerRuns(
     }
     const model = body.model ?? "";
     db.prepare(
-      "INSERT INTO runs (id, workspace_id, session_id, status, model, created_at) VALUES (?, ?, ?, 'running', ?, ?)",
-    ).run(runId, session.workspace_id, session.id, model, Date.now());
+      "INSERT INTO runs (id, workspace_id, session_id, status, model, prompt, created_at) VALUES (?, ?, ?, 'running', ?, ?, ?)",
+    ).run(runId, session.workspace_id, session.id, model, body.prompt, Date.now());
     const file = logFile(options.logDir, session.id, runId);
     const ctx: RunContext = {
       sessionId: session.id,
@@ -106,7 +106,12 @@ export function registerRuns(
     const { id } = request.params as { id: string };
     const runtime = options.runtimes?.[id] ?? options.runtime;
     if (!runtime?.listModels) return reply.code(404).send({ error: "not_found", message: "没有这个 provider" });
-    return runtime.listModels();
+    try {
+      return await runtime.listModels();
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : "模型列表读取失败";
+      return reply.code(502).send({ error: "models_unavailable", message });
+    }
   });
 
   app.get("/api/sessions", async () => {
@@ -124,7 +129,7 @@ export function registerRuns(
     const session = db.prepare("SELECT id FROM chat_sessions WHERE id = ?").get(id);
     if (!session) return reply.code(404).send({ error: "not_found", message: "聊天不存在" });
     return db
-      .prepare("SELECT id, status, created_at FROM runs WHERE session_id = ? ORDER BY created_at")
+      .prepare("SELECT id, status, prompt, created_at FROM runs WHERE session_id = ? ORDER BY created_at")
       .all(id);
   });
 

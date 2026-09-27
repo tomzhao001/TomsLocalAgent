@@ -1,7 +1,7 @@
 import type { AgentRuntime } from "../runs.js";
 import { createCursorRuntime, type CursorSdk } from "./cursor.js";
 import { createOpenCodeRuntime } from "./opencode.js";
-import { cachedModels } from "./map.js";
+import { cachedModels, flattenOpenCodeModels } from "./map.js";
 
 type Memory = {
   get(sessionId: string): string | null;
@@ -30,6 +30,7 @@ export async function loadOpenCodeRuntime(options: { port: number; password?: st
   }
   const client = sdk.createOpencodeClient({ baseUrl: server.url, headers });
   const sessions = new Map<string, string>();
+  const listModels = cachedModels(async () => flattenOpenCodeModels(await client.app.providers()));
   const runtime = createOpenCodeRuntime({
     models: [],
     async prompt(input) {
@@ -60,7 +61,7 @@ export async function loadOpenCodeRuntime(options: { port: number; password?: st
       return id;
     },
   });
-  return { runtime, close: () => server.close() };
+  return { runtime: { ...runtime, listModels }, close: () => server.close() };
 }
 
 function adapt(sdk: any, apiKey: string): CursorSdk {
