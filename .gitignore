@@ -220,6 +220,7 @@ __marimo__/
 # Node / AI Gateway
 node_modules
 .env
+scripts/deploy.env
 data
 /workspaces
 *.tsbuildinfo
@@ -227,3 +228,4 @@ coverage
 .pnpm-store
 .specstory
 .cursorindexingignore
+.vscode/

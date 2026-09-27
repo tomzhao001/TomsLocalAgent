@@ -1,0 +1,2 @@
+*.sh text eol=lf
+scripts/build-push.ps1 text eol=crlf
