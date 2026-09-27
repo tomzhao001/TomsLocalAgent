@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node / AI Gateway
+node_modules
+.env
+data
+*.tsbuildinfo
+coverage
+.pnpm-store
+.specstory
+.cursorindexingignore

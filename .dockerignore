@@ -1,0 +1,8 @@
+node_modules
+dist
+data
+.git
+.specstory
+.vscode
+*.md
+.env
