@@ -100,8 +100,7 @@ function RequirementMeta({ item }: { item: Requirement }) {
   const parts: string[] = [];
   if (item.status === "running" && item.phase && item.phase in stepLabels) parts.push(stepLabels[item.phase as StepId]);
   if (item.status === "waiting_input" && item.wait) parts.push(`${stepLabels[item.wait.fromStep]}卡住`);
-  if (item.archRejects > 0) parts.push(`架构打回 ${item.archRejects}/${rejectLimits.arch}`);
-  if (item.qaRejects > 0) parts.push(`QA 打回 ${item.qaRejects}/${rejectLimits.qa}`);
+  if (item.reviewRejects > 0) parts.push(`Review 打回 ${item.reviewRejects}/${rejectLimits.review}`);
   if (parts.length === 0) return null;
   return <span className="text-xs font-normal text-muted-foreground">{parts.join(" · ")}</span>;
 }

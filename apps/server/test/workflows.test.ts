@@ -87,7 +87,7 @@ describe("工作流接口", () => {
     const history = (await authed("GET", `/api/workspaces/${ws}/requirements?scope=history`)).json();
     expect(history).toMatchObject({ hasMore: false, items: [{ id: created.json().id, status: "delivered" }] });
     const detail = (await authed("GET", `/api/requirements/${created.json().id}`)).json();
-    expect(detail.steps.map((step: { step: string }) => step.step)).toEqual(["develop", "arch", "qa", "devops"]);
+    expect(detail.steps.map((step: { step: string }) => step.step)).toEqual(["develop", "review", "devops"]);
     const log = (await authed("GET", `/api/step-runs/${detail.steps[0].id}/log?offset=0`)).json();
     expect(log.status).toBe("finished");
     expect(log.events.at(-1)).toEqual({ type: "done", status: "finished" });

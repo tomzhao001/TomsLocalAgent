@@ -6,10 +6,14 @@ import { appendLog } from "../../logs.js";
 import type { WorkspaceLockManager } from "../../locks.js";
 import type { AccessProfile } from "../../providers/access.js";
 import type { AgentRuntime } from "../../runs.js";
+import { scanGitRepos } from "../../paths.js";
+import { collectReviewDiff } from "../cursor-dev-loop/diff.js";
 import {
   defaultLoopConfig,
   initialLoopState,
   nextLoop,
+  normalizeLoopState,
+  normalizeStepId,
   type DevLoopState,
   type InputAction,
   type LoopAction,
@@ -63,8 +67,7 @@ type RunStepAction = Extract<LoopAction, { kind: "runStep" }> & { comments?: str
 
 const stepAccess: Record<StepId, AccessProfile> = {
   develop: "develop",
-  arch: "review",
-  qa: "qa",
+  review: "review",
   devops: "devops",
 };
 
@@ -78,6 +81,7 @@ export type DispatcherOptions = {
   locks: WorkspaceLockManager;
   runtime: () => AgentRuntime | null;
   model: string;
+  reviewModel?: string;
   cfg?: LoopConfig;
   intervalMs?: number;
 };
@@ -182,23 +186,32 @@ export class Dispatcher {
     }
     let comments: string | undefined;
     if (latest && latest.consumed === 0) {
-      const result = latest.result_json ? (JSON.parse(latest.result_json) as StepResult) : null;
-      const event = latest.status === "finished" ? toLoopEvent(latest.step, result) : ({ type: "techError" } as const);
-      if (result && result.verdict !== "need_input") comments = result.comments;
-      this.db.prepare("UPDATE step_runs SET consumed = 1 WHERE id = ?").run(latest.id);
-      this.save(head, nextLoop(this.state(head), event, this.cfg), comments);
+      if (String(latest.step) === "qa") {
+        this.db.prepare("UPDATE step_runs SET consumed = 1 WHERE id = ?").run(latest.id);
+        const current = this.state(head);
+        this.save(head, {
+          state: { ...current, phase: "devops", waitingFrom: undefined },
+          action: { kind: "runStep", nodeId: "devops", cardIndex: current.index, prompt: "进入 DevOps" },
+        });
+      } else {
+        const result = latest.result_json ? (JSON.parse(latest.result_json) as StepResult) : null;
+        const event = latest.status === "finished" ? toLoopEvent(normalizeStepId(latest.step), result) : ({ type: "techError" } as const);
+        if (result && result.verdict !== "need_input") comments = result.comments;
+        this.db.prepare("UPDATE step_runs SET consumed = 1 WHERE id = ?").run(latest.id);
+        this.save(head, nextLoop(this.state(head), event, this.cfg), comments);
+      }
       head = this.load(head.id)!;
       if (head.status !== "running") return;
     }
     const pending = head.pending_action_json ? (JSON.parse(head.pending_action_json) as RunStepAction) : null;
-    if (pending?.kind === "runStep") this.launch(head, pending);
+    if (pending?.kind === "runStep") this.launch(head, { ...pending, nodeId: normalizeStepId(pending.nodeId) });
   }
 
   private launch(row: RequirementRow, action: RunStepAction): void {
     const runtime = this.options.runtime();
     if (!runtime) return;
-    const workspace = this.db.prepare("SELECT path FROM workspaces WHERE id = ?").get(row.workspace_id) as
-      | { path: string }
+    const workspace = this.db.prepare("SELECT path, repos_json FROM workspaces WHERE id = ?").get(row.workspace_id) as
+      | { path: string; repos_json: string }
       | undefined;
     if (!workspace) return;
     const card = JSON.parse(row.card_json) as RequirementCard;
@@ -230,29 +243,33 @@ export class Dispatcher {
     const texts: string[] = [];
     let recorded: StepResult | null = null;
     const controller = new AbortController();
-    const prompt = stepPrompt({
-      step: action.nodeId,
-      card,
-      sharedContext: feature?.shared_context ?? "",
-      note: action.prompt,
-      comments: action.comments,
-      firstTurn: !row.agent_id,
-    });
+    const keepAgent = action.nodeId !== "review";
     const done = (async () => {
       let status: StepRunRow["status"] = "finished";
       try {
+        const diff = action.nodeId === "review" ? await this.reviewDiff(workspace) : undefined;
+        const prompt = stepPrompt({
+          step: action.nodeId,
+          card,
+          sharedContext: feature?.shared_context ?? "",
+          note: action.prompt,
+          comments: action.comments,
+          firstTurn: action.nodeId === "review" || !row.agent_id,
+          diff,
+        });
         const terminal = await runtime.startRun(
           {
             sessionId: `req:${row.id}`,
             runId: stepRunId,
             workspaceId: row.workspace_id,
             prompt,
-            model: this.options.model,
+            model: this.modelFor(action.nodeId),
             cwd: workspace.path,
             access: stepAccess[action.nodeId],
-            agentId: row.agent_id,
+            agentId: keepAgent ? row.agent_id : null,
             onAgent: (agentId) => {
-              if (dbOpen(this.db)) this.db.prepare("UPDATE requirements SET agent_id = ? WHERE id = ?").run(agentId, row.id);
+              if (!keepAgent || !dbOpen(this.db)) return;
+              this.db.prepare("UPDATE requirements SET agent_id = ? WHERE id = ?").run(agentId, row.id);
             },
             customTools: stepTools((result) => {
               recorded = result;
@@ -345,6 +362,32 @@ export class Dispatcher {
   }
 
   private state(row: RequirementRow): DevLoopState {
-    return row.state_json ? (JSON.parse(row.state_json) as DevLoopState) : initialLoopState(1);
+    return row.state_json ? normalizeLoopState(JSON.parse(row.state_json)) : initialLoopState(1);
   }
+
+  private modelFor(step: StepId): string {
+    if (step === "review" && this.options.reviewModel) return this.options.reviewModel;
+    return this.options.model;
+  }
+
+  private async reviewDiff(workspace: { path: string; repos_json: string }): Promise<string> {
+    try {
+      return await collectReviewDiff(workspaceRepos(workspace.path, workspace.repos_json));
+    } catch (error) {
+      return `## 本次改动\n\n收集 diff 失败：${(error as Error).message}`;
+    }
+  }
+}
+
+function workspaceRepos(path: string, reposJson: string): string[] {
+  try {
+    const parsed = JSON.parse(reposJson) as unknown;
+    if (Array.isArray(parsed)) {
+      const repos = parsed.filter((item): item is string => typeof item === "string" && item.length > 0);
+      if (repos.length > 0) return repos;
+    }
+  } catch {
+    // 仓库列表损坏时改为扫描目录。
+  }
+  return scanGitRepos(path);
 }

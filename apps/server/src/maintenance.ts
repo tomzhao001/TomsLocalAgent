@@ -1,20 +1,17 @@
 export type WorkflowConfig = {
   models: Record<string, string>;
-  archRejectLimit: number;
-  qaRejectLimit: number;
+  reviewRejectLimit: number;
 };
 
 export const defaultWorkflowConfig: WorkflowConfig = {
-  models: { develop: "composer-2.5", arch: "composer-2.5", qa: "composer-2.5", devops: "composer-2.5" },
-  archRejectLimit: 3,
-  qaRejectLimit: 2,
+  models: { develop: "composer-2.5", review: "composer-2.5", devops: "composer-2.5" },
+  reviewRejectLimit: 3,
 };
 
 export function snapshotConfig(override: Partial<WorkflowConfig> | null): WorkflowConfig {
   return {
     models: { ...defaultWorkflowConfig.models, ...override?.models },
-    archRejectLimit: override?.archRejectLimit ?? defaultWorkflowConfig.archRejectLimit,
-    qaRejectLimit: override?.qaRejectLimit ?? defaultWorkflowConfig.qaRejectLimit,
+    reviewRejectLimit: override?.reviewRejectLimit ?? defaultWorkflowConfig.reviewRejectLimit,
   };
 }
 

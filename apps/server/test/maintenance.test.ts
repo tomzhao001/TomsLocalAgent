@@ -15,9 +15,9 @@ describe("收尾规则", () => {
   it("改全局默认值不会改已经创建的工作流配置", () => {
     const created = snapshotConfig({ models: { develop: "composer-a" } });
     const saved = JSON.parse(JSON.stringify(created));
-    snapshotConfig({ models: { develop: "composer-b" }, archRejectLimit: 9 });
+    snapshotConfig({ models: { develop: "composer-b" }, reviewRejectLimit: 9 });
     expect(saved.models.develop).toBe("composer-a");
-    expect(saved.archRejectLimit).toBe(3);
+    expect(saved.reviewRejectLimit).toBe(3);
   });
 
   it("节点模型修改不影响正在跑的那一步", () => {

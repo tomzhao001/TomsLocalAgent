@@ -36,6 +36,7 @@ const app = await buildApp({
   runtimes,
   dispatchIntervalMs: config.dispatchIntervalMs,
   workflowModel: config.workflowModel,
+  reviewModel: config.reviewModel,
 });
 
 let closing = false;

@@ -39,7 +39,8 @@ pnpm --filter @gateway/web dev
 - `CURSOR_API_KEY`：设置后 Cursor 模式会连接真的 Cursor SDK
 - `OPENCODE_ENABLE=true`：启动 OpenCode 服务，端口是 `OPENCODE_PORT`（默认 3702）
 - `AGENT_RUNTIME=fake`：不调用真模型，方便看聊天、锁和工作流
-- `WORKFLOW_MODEL`：工作流和拆卡使用的 Cursor 模型，默认 `auto`
+- `WORKFLOW_MODEL`：开发、DevOps 和拆卡使用的 Cursor 模型，默认 `auto`
+- `REVIEW_MODEL`：Review 使用的模型。留空则与 `WORKFLOW_MODEL` 相同
 - `DISPATCH_INTERVAL_MS`：工作流调度的轮询间隔，默认 60000（每分钟一次）
 
 ## 聊天和工作流
@@ -47,7 +48,7 @@ pnpm --filter @gateway/web dev
 - 顶部下拉框切换 Workspace，每个 Workspace 下有「聊天」和「工作流」两个子页。Workspace 在设置页添加。
 - **聊天只读**：Cursor 聊天用 plan 模式加只读工具白名单，OpenCode 在服务端禁止编辑和 shell。聊天前后会对比各仓库的 `git status`，有改动时在消息旁标红。
 - **拆卡**：在聊天里点「转为工作流」，或在工作流页点「拆卡」。拆卡由一个单独的只读 agent 完成，结果写入数据库成为草稿，确认后追加到队尾。
-- **工作流**：每个 Workspace 有一条需求卡队列，严格串行执行。每张卡依次经过开发、架构审核、QA、DevOps，整张卡复用同一个 Cursor agent。只有工作流能修改代码。
+- **工作流**：每个 Workspace 有一条需求卡队列，严格串行执行。每张卡依次经过开发（TDD）、Review、DevOps。开发和 DevOps 复用同一个 Cursor agent；Review 每次单独开一个短对话，只看本次 diff 和验收标准。只有工作流能修改代码。
 - **调度**：后台每分钟轮询一次，推进到下一步。卡住时（打回超限、推送失败、agent 提问）在对应节点下方输入，下一次轮询时继续。
 - 聊天和工作流使用两把独立的锁，工作流运行期间可以照常聊天。
 

@@ -25,6 +25,7 @@ export type GatewayConfig = {
   fakeRuntime: boolean;
   dispatchIntervalMs: number;
   workflowModel: string;
+  reviewModel: string;
 };
 
 export function defaultDataDir(platform: NodeJS.Platform = process.platform, env: Env = process.env, home = homedir()): string {
@@ -78,6 +79,7 @@ export function loadConfig(
     fakeRuntime: merged.AGENT_RUNTIME === "fake",
     dispatchIntervalMs: toInterval(merged.DISPATCH_INTERVAL_MS, 60_000),
     workflowModel: merged.WORKFLOW_MODEL || "auto",
+    reviewModel: merged.REVIEW_MODEL || "",
   };
 }
 

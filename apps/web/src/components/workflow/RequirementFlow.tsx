@@ -105,35 +105,21 @@ export function RequirementFlow(props: {
     y += baseHeight + gap + (state === "waiting" && props.onInput ? waitHeight : 0);
     return node;
   });
-  const overArch = requirement.archRejects > rejectLimits.arch;
-  const overQa = requirement.qaRejects > rejectLimits.qa;
+  const overReview = requirement.reviewRejects > rejectLimits.review;
   const edges: (Edge | BuiltInEdge)[] = [
-    { id: "d-a", source: "develop", target: "arch", sourceHandle: "bottom", targetHandle: "top" },
-    { id: "a-q", source: "arch", target: "qa", sourceHandle: "bottom", targetHandle: "top" },
-    { id: "q-o", source: "qa", target: "devops", sourceHandle: "bottom", targetHandle: "top" },
+    { id: "d-r", source: "develop", target: "review", sourceHandle: "bottom", targetHandle: "top" },
+    { id: "r-o", source: "review", target: "devops", sourceHandle: "bottom", targetHandle: "top" },
     {
-      id: "a-d",
+      id: "r-d",
       type: "smoothstep",
       pathOptions: { offset: 24, borderRadius: 8 },
-      source: "arch",
+      source: "review",
       target: "develop",
       sourceHandle: "right-out",
       targetHandle: "right-in",
-      label: `架构打回 ${requirement.archRejects}/${rejectLimits.arch}`,
-      style: { strokeDasharray: "4 4", stroke: overArch ? "#dc2626" : undefined },
-      labelStyle: { fill: overArch ? "#dc2626" : undefined },
-    },
-    {
-      id: "q-d",
-      type: "smoothstep",
-      pathOptions: { offset: 72, borderRadius: 8 },
-      source: "qa",
-      target: "develop",
-      sourceHandle: "right-out",
-      targetHandle: "right-in",
-      label: `QA 打回 ${requirement.qaRejects}/${rejectLimits.qa}`,
-      style: { strokeDasharray: "4 4", stroke: overQa ? "#dc2626" : undefined },
-      labelStyle: { fill: overQa ? "#dc2626" : undefined },
+      label: `Review 打回 ${requirement.reviewRejects}/${rejectLimits.review}`,
+      style: { strokeDasharray: "4 4", stroke: overReview ? "#dc2626" : undefined },
+      labelStyle: { fill: overReview ? "#dc2626" : undefined },
     },
   ];
 

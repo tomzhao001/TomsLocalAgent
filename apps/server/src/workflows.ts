@@ -6,7 +6,7 @@ import { readLog } from "./logs.js";
 import type { Dispatcher, RequirementRow, StepRunRow, WaitInfo } from "./workflows/_framework/dispatcher.js";
 import { stepLogFile } from "./workflows/_framework/dispatcher.js";
 import { appendRequirements, splitLogFile, type SplitRunner, type SplitTaskRow } from "./workflows/_framework/split-task.js";
-import type { DevLoopState, InputAction } from "./workflows/cursor-dev-loop/next.js";
+import { normalizeLoopState, normalizeStepId, type DevLoopState, type InputAction } from "./workflows/cursor-dev-loop/next.js";
 
 const inputActions: InputAction[] = ["answer", "continue", "forcePass", "abort"];
 const historyPageSize = 20;
@@ -183,7 +183,7 @@ export function registerWorkflows(
 }
 
 function requirementDto(db: DatabaseSync, row: RequirementRow, withSteps: boolean) {
-  const state = row.state_json ? (JSON.parse(row.state_json) as DevLoopState) : null;
+  const state: DevLoopState | null = row.state_json ? normalizeLoopState(JSON.parse(row.state_json)) : null;
   const steps = withSteps
     ? (db
         .prepare("SELECT * FROM step_runs WHERE requirement_id = ? ORDER BY started_at, rowid")
@@ -197,9 +197,8 @@ function requirementDto(db: DatabaseSync, row: RequirementRow, withSteps: boolea
     card: JSON.parse(row.card_json) as RequirementCard,
     status: row.status,
     phase: state?.phase ?? null,
-    archRejects: state?.archRejects ?? 0,
-    qaRejects: state?.qaRejects ?? 0,
-    wait: row.wait_json ? (JSON.parse(row.wait_json) as WaitInfo) : null,
+    reviewRejects: state?.reviewRejects ?? 0,
+    wait: row.wait_json ? normalizeWait(JSON.parse(row.wait_json) as WaitInfo) : null,
     hasAgent: Boolean(row.agent_id),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -216,6 +215,11 @@ function requirementDto(db: DatabaseSync, row: RequirementRow, withSteps: boolea
       endedAt: step.ended_at,
     })),
   };
+}
+
+function normalizeWait(wait: WaitInfo): WaitInfo {
+  const from = String(wait.fromStep);
+  return { ...wait, fromStep: from === "qa" ? "review" : normalizeStepId(from) };
 }
 
 function featuresFor(db: DatabaseSync, rows: RequirementRow[]) {

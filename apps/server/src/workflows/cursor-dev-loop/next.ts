@@ -1,20 +1,18 @@
 export type LoopConfig = {
-  archRejectLimit: number;
-  qaRejectLimit: number;
+  reviewRejectLimit: number;
 };
 
-export const defaultLoopConfig: LoopConfig = { archRejectLimit: 3, qaRejectLimit: 2 };
+export const defaultLoopConfig: LoopConfig = { reviewRejectLimit: 3 };
 
-export type StepId = "develop" | "arch" | "qa" | "devops";
+export type StepId = "develop" | "review" | "devops";
 
-export const stepIds: StepId[] = ["develop", "arch", "qa", "devops"];
+export const stepIds: StepId[] = ["develop", "review", "devops"];
 
 export type DevLoopState = {
   cardCount: number;
   index: number;
   phase: StepId | "waiting" | "done" | "aborted";
-  archRejects: number;
-  qaRejects: number;
+  reviewRejects: number;
   techErrors: number;
   waitingFrom?: StepId;
 };
@@ -23,7 +21,6 @@ export type LoopEvent =
   | { type: "start" }
   | { type: "stepOk" }
   | { type: "review"; pass: boolean }
-  | { type: "qa"; pass: boolean }
   | { type: "devops"; results: boolean[] }
   | { type: "techError" }
   | { type: "needInput"; question: string }
@@ -50,8 +47,37 @@ const waitOptions: Record<WaitKind, InputAction[]> = {
   techError: ["answer", "abort"],
 };
 
+const phases = new Set<DevLoopState["phase"]>(["develop", "review", "devops", "waiting", "done", "aborted"]);
+
+export function normalizeStepId(step: string): StepId {
+  if (step === "arch" || step === "review") return "review";
+  if (step === "qa" || step === "devops") return "devops";
+  return "develop";
+}
+
+export function normalizeLoopState(raw: unknown): DevLoopState {
+  const input = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const phase = normalizePhase(typeof input.phase === "string" ? input.phase : "develop");
+  const state: DevLoopState = {
+    cardCount: typeof input.cardCount === "number" ? input.cardCount : 1,
+    index: typeof input.index === "number" ? input.index : 0,
+    phase,
+    reviewRejects:
+      typeof input.reviewRejects === "number"
+        ? input.reviewRejects
+        : typeof input.archRejects === "number"
+          ? input.archRejects
+          : 0,
+    techErrors: typeof input.techErrors === "number" ? input.techErrors : 0,
+  };
+  if (typeof input.waitingFrom === "string") {
+    state.waitingFrom = input.waitingFrom === "qa" ? "review" : normalizeStepId(input.waitingFrom);
+  }
+  return state;
+}
+
 export function initialLoopState(cardCount: number): DevLoopState {
-  return { cardCount, index: 0, phase: "develop", archRejects: 0, qaRejects: 0, techErrors: 0 };
+  return { cardCount, index: 0, phase: "develop", reviewRejects: 0, techErrors: 0 };
 }
 
 export function nextLoop(state: DevLoopState, event: LoopEvent, cfg: LoopConfig = defaultLoopConfig): { state: DevLoopState; action: LoopAction } {
@@ -61,27 +87,18 @@ export function nextLoop(state: DevLoopState, event: LoopEvent, cfg: LoopConfig 
   if (event.type === "techError") return onTechError(state);
   if (state.phase === "waiting") return onWait(state, event);
   if (event.type === "needInput") return wait(clearTech(state), state.phase, event.question, "question");
-  if (state.phase === "develop" && event.type === "stepOk") return run(clearTech(state, "arch"), "arch", "架构审核");
-  if (state.phase === "arch" && event.type === "review") return onArch(state, event.pass, cfg);
-  if (state.phase === "qa" && event.type === "qa") return onQa(state, event.pass, cfg);
+  if (state.phase === "develop" && event.type === "stepOk") return run(clearTech(state, "review"), "review", "Review");
+  if (state.phase === "review" && event.type === "review") return onReview(state, event.pass, cfg);
   if (state.phase === "devops" && event.type === "devops") return onDevops(state, event.results);
   return { state, action: runAction(state, state.phase, "保持当前步骤") };
 }
 
-function onArch(state: DevLoopState, pass: boolean, cfg: LoopConfig): { state: DevLoopState; action: LoopAction } {
-  if (pass) return run(clearTech({ ...state, phase: "qa" }), "qa", "QA");
-  const archRejects = state.archRejects + 1;
-  const next = clearTech({ ...state, archRejects });
-  if (archRejects <= cfg.archRejectLimit) return run(next, "develop", "架构打回，继续开发");
-  return wait(next, "arch", "架构审核超过打回上限", "limit");
-}
-
-function onQa(state: DevLoopState, pass: boolean, cfg: LoopConfig): { state: DevLoopState; action: LoopAction } {
+function onReview(state: DevLoopState, pass: boolean, cfg: LoopConfig): { state: DevLoopState; action: LoopAction } {
   if (pass) return run(clearTech({ ...state, phase: "devops" }), "devops", "DevOps 发布");
-  const qaRejects = state.qaRejects + 1;
-  const next = clearTech({ ...state, qaRejects });
-  if (qaRejects <= cfg.qaRejectLimit) return run(next, "develop", "QA 打回，继续开发");
-  return wait(next, "qa", "QA 超过打回上限", "limit");
+  const reviewRejects = state.reviewRejects + 1;
+  const next = clearTech({ ...state, reviewRejects });
+  if (reviewRejects <= cfg.reviewRejectLimit) return run(next, "develop", "Review 打回，继续开发");
+  return wait(next, "review", "Review 超过打回上限", "limit");
 }
 
 function onDevops(state: DevLoopState, results: boolean[]): { state: DevLoopState; action: LoopAction } {
@@ -97,8 +114,7 @@ function onDevops(state: DevLoopState, results: boolean[]): { state: DevLoopStat
     ...state,
     index: state.index + 1,
     phase: "develop",
-    archRejects: 0,
-    qaRejects: 0,
+    reviewRejects: 0,
   });
   return {
     state: advanced,
@@ -108,9 +124,10 @@ function onDevops(state: DevLoopState, results: boolean[]): { state: DevLoopStat
 
 function onTechError(state: DevLoopState): { state: DevLoopState; action: LoopAction } {
   const techErrors = state.techErrors + 1;
-  const phase = state.phase === "waiting" ? state.waitingFrom ?? "develop" : state.phase;
-  if (techErrors >= 2) return wait({ ...state, techErrors, waitingFrom: phase as StepId }, phase as StepId, "同一步连续技术错误", "techError");
-  return run({ ...state, techErrors }, phase as StepId, "技术错误后重试");
+  const current = state.phase === "waiting" ? state.waitingFrom ?? "develop" : state.phase;
+  const phase: StepId = current === "review" || current === "devops" ? current : "develop";
+  if (techErrors >= 2) return wait({ ...state, techErrors, waitingFrom: phase }, phase, "同一步连续技术错误", "techError");
+  return run({ ...state, techErrors }, phase, "技术错误后重试");
 }
 
 function onWait(state: DevLoopState, event: LoopEvent): { state: DevLoopState; action: LoopAction } {
@@ -120,8 +137,7 @@ function onWait(state: DevLoopState, event: LoopEvent): { state: DevLoopState; a
   }
   if (event.type === "continue") return run({ ...state, phase: "develop", waitingFrom: undefined }, "develop", `人工继续：${event.text}`);
   if (event.type === "forcePass") {
-    if (state.waitingFrom === "arch") return run({ ...state, phase: "qa", waitingFrom: undefined }, "qa", "强制通过架构审核");
-    if (state.waitingFrom === "qa") return run({ ...state, phase: "devops", waitingFrom: undefined }, "devops", "强制通过 QA");
+    if (state.waitingFrom === "review") return run({ ...state, phase: "devops", waitingFrom: undefined }, "devops", "强制通过 Review");
     return onDevops({ ...state, phase: "devops", waitingFrom: undefined }, []);
   }
   const from = state.waitingFrom ?? "develop";
@@ -145,4 +161,11 @@ function wait(state: DevLoopState, from: StepId, reason: string, waitKind: WaitK
 
 function clearTech(state: DevLoopState, phase?: StepId): DevLoopState {
   return { ...state, techErrors: 0, phase: phase ?? state.phase };
+}
+
+function normalizePhase(phase: string): DevLoopState["phase"] {
+  if (phase === "arch") return "review";
+  if (phase === "qa") return "devops";
+  if (phases.has(phase as DevLoopState["phase"])) return phase as DevLoopState["phase"];
+  return "develop";
 }

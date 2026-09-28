@@ -17,8 +17,7 @@ function requirement(patch: Partial<Requirement>): Requirement {
     card,
     status: "running",
     phase: "develop",
-    archRejects: 0,
-    qaRejects: 0,
+    reviewRejects: 0,
     wait: null,
     createdAt: 1,
     finishedAt: null,
@@ -58,8 +57,8 @@ describe("被卡住节点的输入框", () => {
       <WaitForm
         wait={{
           kind: "limit",
-          fromStep: "arch",
-          message: "架构审核超过打回上限",
+          fromStep: "review",
+          message: "Review 超过打回上限",
           comments: "拆分函数",
           options: ["continue", "forcePass", "abort"],
         }}
@@ -75,21 +74,21 @@ describe("被卡住节点的输入框", () => {
 describe("节点状态", () => {
   it("按步骤运行记录和等待信息推导", () => {
     const item = requirement({
-      phase: "arch",
+      phase: "review",
       steps: [run("develop", "finished", { verdict: "pass", comments: "" })],
     });
     expect(stepState(item, "develop")).toBe("passed");
-    expect(stepState(item, "arch")).toBe("queued");
-    expect(stepState(item, "qa")).toBe("idle");
+    expect(stepState(item, "review")).toBe("queued");
+    expect(stepState(item, "devops")).toBe("idle");
     const waiting = requirement({
       status: "waiting_input",
       phase: "waiting",
-      wait: { kind: "limit", fromStep: "arch", message: "", options: ["abort"] },
-      steps: [run("arch", "finished", { verdict: "reject", comments: "" })],
+      wait: { kind: "limit", fromStep: "review", message: "", options: ["abort"] },
+      steps: [run("review", "finished", { verdict: "reject", comments: "补测试" })],
     });
-    expect(stepState(waiting, "arch")).toBe("waiting");
+    expect(stepState(waiting, "review")).toBe("waiting");
     expect(stepState(requirement({ steps: [run("develop", "running")] }), "develop")).toBe("running");
-    expect(stepState(requirement({ phase: "qa", steps: [run("develop", "interrupted")] }), "develop")).toBe("error");
+    expect(stepState(requirement({ phase: "devops", steps: [run("develop", "interrupted")] }), "develop")).toBe("error");
   });
 
   it("需求列表按大功能分组，手动添加的单独一组", () => {

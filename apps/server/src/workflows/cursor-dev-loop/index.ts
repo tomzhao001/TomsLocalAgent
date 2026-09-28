@@ -5,16 +5,13 @@ export const definition = {
   graph: {
     nodes: [
       { id: "develop", label: "开发" },
-      { id: "arch", label: "架构审核" },
-      { id: "qa", label: "QA" },
+      { id: "review", label: "Review" },
       { id: "devops", label: "DevOps" },
     ],
     edges: [
-      { from: "develop", to: "arch" },
-      { from: "arch", to: "qa" },
-      { from: "qa", to: "devops" },
-      { from: "arch", to: "develop", back: true },
-      { from: "qa", to: "develop", back: true },
+      { from: "develop", to: "review" },
+      { from: "review", to: "devops" },
+      { from: "review", to: "develop", back: true },
     ],
   },
 };

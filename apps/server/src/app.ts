@@ -30,6 +30,7 @@ export type AppOptions = {
   runtimes?: Partial<Record<string, AgentRuntime>>;
   dispatchIntervalMs?: number;
   workflowModel?: string;
+  reviewModel?: string;
 };
 
 export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
@@ -51,6 +52,7 @@ export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
       locks,
       runtime: workflowRuntime,
       model,
+      reviewModel: options.reviewModel,
       intervalMs: options.dispatchIntervalMs,
     });
     const splits = new SplitRunner(db, { logDir, runtime: workflowRuntime, model });

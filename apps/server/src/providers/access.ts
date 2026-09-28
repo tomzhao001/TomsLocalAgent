@@ -1,4 +1,4 @@
-export type AccessProfile = "chat" | "split" | "develop" | "review" | "qa" | "devops";
+export type AccessProfile = "chat" | "split" | "develop" | "review" | "devops";
 
 export type CursorAccess = {
   mode: "agent" | "plan";
@@ -29,12 +29,7 @@ export const cursorAccess: Record<AccessProfile, CursorAccess> = {
   review: {
     mode: "agent",
     tools: [...readTools, "mcp"],
-    rules: "【纪律】你现在是架构审核，只读代码并给出判定，禁止修改任何文件。",
-  },
-  qa: {
-    mode: "agent",
-    tools: [...readTools, "shell", "mcp"],
-    rules: "【纪律】你现在是 QA，只能运行测试和检查命令，禁止修改任何源代码或配置文件。",
+    rules: "【纪律】你现在是 Review，只读本次改动并对照验收标准给出判定，禁止修改任何文件，禁止搜索或通读整个代码仓库。",
   },
   devops: {
     mode: "agent",

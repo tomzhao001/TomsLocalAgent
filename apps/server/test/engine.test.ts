@@ -40,11 +40,13 @@ describe("工作流框架", () => {
     await tools.submit_verdict!.execute({ verdict: "reject", comments: "命名不清" });
     await tools.ask_user!.execute({ question: "用哪个数据库？" });
     const bad = await tools.submit_verdict!.execute({ verdict: "maybe" });
+    const empty = await tools.submit_verdict!.execute({ verdict: "reject", comments: "  " });
     expect(seen).toEqual([
       { verdict: "reject", comments: "命名不清" },
       { verdict: "need_input", question: "用哪个数据库？" },
     ]);
     expect(bad).toMatchObject({ isError: true });
+    expect(empty).toMatchObject({ isError: true });
   });
 
   it("文本结果块兜底，结果按步骤转成状态机事件", () => {
@@ -52,10 +54,11 @@ describe("工作流框架", () => {
     expect(parsed).toEqual({ verdict: "pass", comments: "ok" });
     expect(parseResultBlock(["没有结果块"])).toBeNull();
     expect(toLoopEvent("develop", parsed)).toEqual({ type: "stepOk" });
-    expect(toLoopEvent("arch", { verdict: "reject", comments: "" })).toEqual({ type: "review", pass: false });
-    expect(toLoopEvent("qa", { verdict: "pass", comments: "" })).toEqual({ type: "qa", pass: true });
-    expect(toLoopEvent("devops", { verdict: "reject", comments: "" })).toEqual({ type: "devops", results: [false] });
+    expect(toLoopEvent("review", { verdict: "reject", comments: "" })).toEqual({ type: "techError" });
+    expect(toLoopEvent("review", { verdict: "reject", comments: "补上权限检查" })).toEqual({ type: "review", pass: false });
+    expect(toLoopEvent("review", { verdict: "pass", comments: "" })).toEqual({ type: "review", pass: true });
+    expect(toLoopEvent("devops", { verdict: "reject", comments: "推送失败" })).toEqual({ type: "devops", results: [false] });
     expect(toLoopEvent("develop", { verdict: "need_input", question: "?" })).toEqual({ type: "needInput", question: "?" });
-    expect(toLoopEvent("qa", null)).toEqual({ type: "techError" });
+    expect(toLoopEvent("review", null)).toEqual({ type: "techError" });
   });
 });

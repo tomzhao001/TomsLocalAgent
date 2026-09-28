@@ -9,7 +9,7 @@ export function stepTools(record: (result: StepResult) => void): Record<string, 
   return {
     submit_verdict: {
       description:
-        "提交本步骤的结果。开发和 DevOps 完成后提交 pass；架构审核和 QA 按判定提交 pass 或 reject；DevOps 有仓库推送失败时提交 reject。comments 写明理由或改动摘要。",
+        "提交本步骤的结果。开发在测试通过后提交 pass；Review 按漏洞和验收标准提交 pass 或 reject；DevOps 全部推送成功提交 pass，有仓库失败提交 reject。reject 的 comments 必须写明修改建议或失败原因，不能为空。",
       inputSchema: {
         type: "object",
         properties: {
@@ -21,7 +21,11 @@ export function stepTools(record: (result: StepResult) => void): Record<string, 
       execute(args) {
         const verdict = args.verdict === "reject" ? "reject" : args.verdict === "pass" ? "pass" : null;
         if (!verdict) return { content: [{ type: "text", text: "verdict 只能是 pass 或 reject" }], isError: true };
-        record({ verdict, comments: typeof args.comments === "string" ? args.comments : "" });
+        const comments = typeof args.comments === "string" ? args.comments : "";
+        if (verdict === "reject" && !comments.trim()) {
+          return { content: [{ type: "text", text: "reject 必须在 comments 里写明审核建议" }], isError: true };
+        }
+        record({ verdict, comments });
         return "已记录结果，请结束本轮回复。";
       },
     },
@@ -52,7 +56,9 @@ export function parseResultBlock(texts: string[]): StepResult | null {
     const parsed = JSON.parse(last) as { verdict?: string; comments?: string; question?: string };
     if (parsed.verdict === "need_input" && parsed.question) return { verdict: "need_input", question: parsed.question };
     if (parsed.verdict === "pass" || parsed.verdict === "reject") {
-      return { verdict: parsed.verdict, comments: parsed.comments ?? "" };
+      const comments = parsed.comments ?? "";
+      if (parsed.verdict === "reject" && !comments.trim()) return null;
+      return { verdict: parsed.verdict, comments };
     }
   } catch {
     return null;
@@ -63,9 +69,9 @@ export function parseResultBlock(texts: string[]): StepResult | null {
 export function toLoopEvent(step: StepId, result: StepResult | null): LoopEvent {
   if (!result) return { type: "techError" };
   if (result.verdict === "need_input") return { type: "needInput", question: result.question };
+  if (result.verdict === "reject" && !result.comments.trim()) return { type: "techError" };
   const pass = result.verdict === "pass";
-  if (step === "arch") return { type: "review", pass };
-  if (step === "qa") return { type: "qa", pass };
+  if (step === "review") return { type: "review", pass };
   if (step === "devops") return { type: "devops", results: [pass] };
   return { type: "stepOk" };
 }

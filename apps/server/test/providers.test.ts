@@ -147,14 +147,14 @@ describe("注入的 SDK", () => {
 
   it("工作流各步骤用各自的档位，拆卡和审核不能编辑", () => {
     expect(cursorAccess.develop.tools).toBeUndefined();
-    for (const profile of ["split", "review", "qa", "devops"] as const) {
+    for (const profile of ["split", "review", "devops"] as const) {
       expect(cursorAccess[profile].tools).toContain("mcp");
       expect(cursorAccess[profile].tools).not.toContain("edit");
       expect(cursorAccess[profile].tools).not.toContain("delete");
     }
     expect(cursorAccess.split.tools).not.toContain("shell");
     expect(cursorAccess.review.tools).not.toContain("shell");
-    expect(cursorAccess.qa.tools).toContain("shell");
+    expect(cursorAccess.devops.tools).toContain("shell");
   });
 
   it("OpenCode 拒绝非聊天的运行", async () => {
