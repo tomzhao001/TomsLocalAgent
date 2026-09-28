@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
-import { createCursorRuntime, type CursorSdk } from "../src/providers/cursor.js";
+import { cursorAccess } from "../src/providers/access.js";
+import {
+  createCursorRuntime,
+  type CursorAgentOptions,
+  type CursorSdk,
+  type CursorSendOptions,
+} from "../src/providers/cursor.js";
 import { createOpenCodeRuntime } from "../src/providers/opencode.js";
 import { cachedModels, classifyCursorFailure, flattenOpenCodeModels, mapCursorEvent, takeOpencodePart } from "../src/providers/map.js";
 import type { AgentRuntime } from "../src/runs.js";
@@ -81,7 +87,7 @@ describe("注入的 SDK", () => {
 
   it("换模型只影响这一次 run，取消后状态是 cancelled", async () => {
     const models: string[] = [];
-    const cursor = createCursorRuntime(scriptedCursor(models), () => {}, () => null);
+    const cursor = createCursorRuntime(scriptedCursor(models));
     const hanging: AgentRuntime = {
       async startRun(_input, _emit, signal) {
         await new Promise<void>((resolve) => {
@@ -121,6 +127,53 @@ describe("注入的 SDK", () => {
     await waitStatus(authed, running.json().runId, "cancelled");
   });
 
+  it("聊天档位只读，create 和 resume 都带上 mode 和工具白名单", async () => {
+    const calls: { kind: "create" | "resume"; options: CursorAgentOptions; send?: CursorSendOptions }[] = [];
+    const runtime = createCursorRuntime(recordingCursor(calls));
+    const saved: string[] = [];
+    const base = { sessionId: "s", runId: "r", workspaceId: "w", prompt: "看看", model: "m", cwd: "/" };
+    await runtime.startRun({ ...base, access: "chat", agentId: null, onAgent: (id) => saved.push(id) }, () => {});
+    await runtime.startRun({ ...base, access: "chat", agentId: "agent-1", onAgent: (id) => saved.push(id) }, () => {});
+    expect(calls.map((call) => call.kind)).toEqual(["create", "resume"]);
+    expect(saved).toEqual(["agent-1"]);
+    for (const call of calls) {
+      expect(call.options.access.mode).toBe("plan");
+      expect(call.options.access.tools).toBeDefined();
+      for (const banned of ["edit", "delete", "shell", "applyAgentDiff", "task", "mcp"]) {
+        expect(call.options.access.tools).not.toContain(banned);
+      }
+    }
+  });
+
+  it("工作流各步骤用各自的档位，拆卡和审核不能编辑", () => {
+    expect(cursorAccess.develop.tools).toBeUndefined();
+    for (const profile of ["split", "review", "qa", "devops"] as const) {
+      expect(cursorAccess[profile].tools).toContain("mcp");
+      expect(cursorAccess[profile].tools).not.toContain("edit");
+      expect(cursorAccess[profile].tools).not.toContain("delete");
+    }
+    expect(cursorAccess.split.tools).not.toContain("shell");
+    expect(cursorAccess.review.tools).not.toContain("shell");
+    expect(cursorAccess.qa.tools).toContain("shell");
+  });
+
+  it("OpenCode 拒绝非聊天的运行", async () => {
+    const runtime = createOpenCodeRuntime({
+      models: [],
+      prompt: async () => {},
+      abort: async () => {},
+      ensureSession: async () => "oc",
+      events: async function* () {},
+    });
+    const events: { type: string }[] = [];
+    const status = await runtime.startRun(
+      { sessionId: "s", runId: "r", workspaceId: "w", prompt: "改代码", model: "m", cwd: "/", access: "develop" },
+      (event) => events.push(event),
+    );
+    expect(status).toBe("error");
+    expect(events[0]).toMatchObject({ type: "error" });
+  });
+
   it("OpenCode 运行时对重复 part 只发出一条", async () => {
     const part = { id: "p1", type: "text", text: "只一次", sessionID: "oc", time: { end: 1 } };
     const runtime = createOpenCodeRuntime({
@@ -158,7 +211,7 @@ function scriptedCursor(models: string[]): CursorSdk {
   function agent() {
     return {
       agentId: "agent-1",
-      async send(prompt: string, options: { model: { id: string } }) {
+      async send(prompt: string, options: CursorSendOptions) {
         models.push(options.model.id);
         return {
           async *stream() {
@@ -172,6 +225,35 @@ function scriptedCursor(models: string[]): CursorSdk {
       },
     };
   }
+}
+
+function recordingCursor(calls: { kind: "create" | "resume"; options: CursorAgentOptions; send?: CursorSendOptions }[]): CursorSdk {
+  const agent = (entry: { send?: CursorSendOptions }) => ({
+    agentId: "agent-1",
+    async send(_prompt: string, options: CursorSendOptions) {
+      entry.send = options;
+      return {
+        async *stream() {},
+        async wait() {
+          return { status: "finished" as const };
+        },
+        async cancel() {},
+      };
+    },
+  });
+  return {
+    models: [],
+    async create(options) {
+      const entry = { kind: "create" as const, options };
+      calls.push(entry);
+      return agent(entry);
+    },
+    async resume(_agentId, options) {
+      const entry = { kind: "resume" as const, options };
+      calls.push(entry);
+      return agent(entry);
+    },
+  };
 }
 
 async function waitStatus(

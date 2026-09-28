@@ -126,15 +126,25 @@ function existingPaths(db: DatabaseSync, exceptId?: string): string[] {
 }
 
 function referenceCount(db: DatabaseSync, id: string): number {
-  const chats = db.prepare("SELECT COUNT(*) AS n FROM chat_sessions WHERE workspace_id = ?").get(id) as { n: number };
-  return Number(chats.n);
+  const row = db
+    .prepare(
+      `SELECT (SELECT COUNT(*) FROM chat_sessions WHERE workspace_id = ?)
+            + (SELECT COUNT(*) FROM requirements WHERE workspace_id = ?)
+            + (SELECT COUNT(*) FROM split_tasks WHERE workspace_id = ?) AS n`,
+    )
+    .get(id, id, id) as { n: number };
+  return Number(row.n);
 }
 
 function runningCount(db: DatabaseSync, id: string): number {
-  const runs = db.prepare("SELECT COUNT(*) AS n FROM runs WHERE workspace_id = ? AND status = 'running'").get(id) as {
-    n: number;
-  };
-  return Number(runs.n);
+  const row = db
+    .prepare(
+      `SELECT (SELECT COUNT(*) FROM runs WHERE workspace_id = ? AND status = 'running')
+            + (SELECT COUNT(*) FROM requirements WHERE workspace_id = ? AND status IN ('pending', 'running', 'waiting_input'))
+            + (SELECT COUNT(*) FROM split_tasks WHERE workspace_id = ? AND status = 'running') AS n`,
+    )
+    .get(id, id, id) as { n: number };
+  return Number(row.n);
 }
 
 function row(db: DatabaseSync, id: string): WorkspaceRow | undefined {

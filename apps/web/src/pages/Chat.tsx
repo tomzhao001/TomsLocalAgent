@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { GitBranchPlus, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -8,18 +8,20 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { SplitDialog } from "@/components/workflow/SplitDialog";
+import { readonlyViolation, type LogEvent } from "@/lib/api";
 
-type Workspace = { id: string; name: string; archived: boolean };
 type Session = { id: string; provider: string; workspace_id: string; workspace_name: string; title: string | null };
 type RunRow = { id: string; status: string; prompt: string | null };
-type LogEvent = { type: string; text?: string; status?: string };
 type ModelInfo = { id: string; label: string };
-type Bubble = { role: "user" | "assistant"; text: string };
+type Bubble =
+  | { role: "user" | "assistant"; text: string }
+  | { role: "end"; runId: string; finished: boolean; violation: boolean };
 
-export function ChatPage() {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+const providerLabels: Record<string, string> = { cursor: "Cursor", opencode: "OpenCode" };
+
+export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string; onSplitStarted: () => void }) {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [workspaceId, setWorkspaceId] = useState("");
   const [provider, setProvider] = useState("cursor");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -28,22 +30,20 @@ export function ChatPage() {
   const [modelError, setModelError] = useState("");
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
   const [error, setError] = useState("");
   const loadSeq = useRef(0);
 
   const activeProvider = sessionId ? (sessions.find((item) => item.id === sessionId)?.provider ?? provider) : provider;
 
   async function reloadSessions() {
-    const res = await fetch("/api/sessions", { credentials: "include" });
+    const res = await fetch(`/api/sessions?workspaceId=${encodeURIComponent(workspaceId)}`, { credentials: "include" });
     if (res.ok) setSessions((await res.json()) as Session[]);
   }
 
   useEffect(() => {
-    void fetch("/api/workspaces", { credentials: "include" })
-      .then((res) => res.json())
-      .then((items: Workspace[]) => setWorkspaces(items.filter((item) => !item.archived)));
     void reloadSessions();
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,10 +87,11 @@ export function ChatPage() {
       if (run.prompt) next.push({ role: "user", text: run.prompt });
       const log = await fetch(`/api/runs/${run.id}/log?offset=0`, { credentials: "include" });
       if (seq !== loadSeq.current) return;
-      const body = (await log.json()) as { events: LogEvent[] };
+      const body = (await log.json()) as { events: LogEvent[]; status: string };
       for (const event of body.events) {
         if (event.type === "text" && event.text) next.push({ role: "assistant", text: event.text });
       }
+      if (body.status !== "running") next.push(roundEnd(run.id, body.status, body.events));
     }
     if (seq !== loadSeq.current) return;
     setBubbles(next);
@@ -154,19 +155,25 @@ export function ChatPage() {
     setPrompt("");
     setBubbles((current) => [...current, { role: "user", text }]);
     let offset = 0;
+    const events: LogEvent[] = [];
     for (let i = 0; i < 30; i++) {
       if (seq !== loadSeq.current) return;
       const log = await fetch(`/api/runs/${body.runId}/log?offset=${offset}`, { credentials: "include" });
       if (seq !== loadSeq.current) return;
       const payload = (await log.json()) as { events: LogEvent[]; nextOffset: number; status: string };
       if (payload.events.length) {
-        const texts = payload.events.filter((item) => item.type === "text" && item.text).map((item) => item.text!);
+        events.push(...payload.events);
+        const texts = payload.events.flatMap((item) => (item.type === "text" && item.text ? [item.text] : []));
         if (texts.length && seq === loadSeq.current) {
           setBubbles((current) => [...current, ...texts.map((line) => ({ role: "assistant" as const, text: line }))]);
         }
         offset = payload.nextOffset;
       }
-      if (payload.status !== "running") break;
+      if (payload.status !== "running") {
+        const runId = body.runId;
+        setBubbles((current) => [...current, roundEnd(runId, payload.status, events)]);
+        break;
+      }
       if (document.visibilityState === "hidden") break;
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
@@ -180,21 +187,6 @@ export function ChatPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="grid gap-2">
-            <Label>Workspace</Label>
-            <Select value={workspaceId} onValueChange={setWorkspaceId}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="请选择" />
-              </SelectTrigger>
-              <SelectContent>
-                {workspaces.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-2">
             <Label>模式</Label>
             <Select value={provider} onValueChange={setProvider}>
               <SelectTrigger className="w-full">
@@ -206,12 +198,13 @@ export function ChatPage() {
               </SelectContent>
             </Select>
           </div>
-          <Button type="button" onClick={() => void createSession()} disabled={!workspaceId}>
+          <Button type="button" onClick={() => void createSession()}>
             新建聊天
           </Button>
           <Separator />
           <ScrollArea className="h-64">
             <ul className="flex flex-col gap-1 pr-3">
+              {sessions.length === 0 ? <li className="px-2 text-muted-foreground">还没有聊天</li> : null}
               {sessions.map((item) => (
                 <li key={item.id}>
                   <Button
@@ -220,7 +213,7 @@ export function ChatPage() {
                     className="h-auto w-full justify-start px-2 py-1.5 whitespace-normal"
                     onClick={() => void openSession(item.id)}
                   >
-                    {item.workspace_name} / {item.provider}
+                    {item.title ?? providerLabels[item.provider] ?? item.provider}
                   </Button>
                 </li>
               ))}
@@ -231,7 +224,7 @@ export function ChatPage() {
       <Card className="flex min-h-[32rem] flex-col">
         <CardHeader>
           <CardTitle>消息</CardTitle>
-          {sessionId ? <CardDescription>当前聊天已绑定 workspace 和模式，不能再改。</CardDescription> : null}
+          <CardDescription>只读模式：聊天不会修改代码，改代码请转为工作流。</CardDescription>
           <CardAction>
             <Button
               type="button"
@@ -248,18 +241,35 @@ export function ChatPage() {
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
           <ScrollArea className="min-h-48 flex-1 rounded-lg border">
             <div className="flex flex-col gap-3 p-3">
-              {bubbles.map((bubble, index) => (
-                <p
-                  key={index}
-                  className={
-                    bubble.role === "user"
-                      ? "ml-auto max-w-[80%] rounded-2xl bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground"
-                      : "mr-auto max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-sm leading-6"
-                  }
-                >
-                  {bubble.text}
-                </p>
-              ))}
+              {bubbles.map((bubble, index) =>
+                bubble.role === "end" ? (
+                  <div key={index} className="flex flex-wrap items-center gap-2">
+                    {bubble.violation ? (
+                      <span className="flex items-center gap-1 text-xs text-destructive">
+                        <TriangleAlert className="size-3.5" />
+                        {readonlyViolation}
+                      </span>
+                    ) : null}
+                    {bubble.finished ? (
+                      <Button type="button" size="xs" variant="outline" onClick={() => setSplitOpen(true)}>
+                        <GitBranchPlus data-icon="inline-start" />
+                        转为工作流
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p
+                    key={index}
+                    className={
+                      bubble.role === "user"
+                        ? "ml-auto max-w-[80%] rounded-2xl bg-primary px-3 py-2 text-sm leading-6 whitespace-pre-wrap text-primary-foreground"
+                        : "mr-auto max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-sm leading-6 whitespace-pre-wrap"
+                    }
+                  >
+                    {bubble.text}
+                  </p>
+                ),
+              )}
             </div>
           </ScrollArea>
           <form className="flex flex-col gap-2" onSubmit={(event) => void send(event)}>
@@ -294,6 +304,24 @@ export function ChatPage() {
           ) : null}
         </CardContent>
       </Card>
+      {sessionId ? (
+        <SplitDialog
+          open={splitOpen}
+          onOpenChange={setSplitOpen}
+          workspaceId={workspaceId}
+          chatSessionId={sessionId}
+          onStarted={onSplitStarted}
+        />
+      ) : null}
     </section>
   );
+}
+
+function roundEnd(runId: string, status: string, events: LogEvent[]): Bubble {
+  return {
+    role: "end",
+    runId,
+    finished: status === "finished",
+    violation: events.some((event) => event.type === "error" && event.message === readonlyViolation),
+  };
 }

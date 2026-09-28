@@ -7,6 +7,8 @@ export const defaultLoopConfig: LoopConfig = { archRejectLimit: 3, qaRejectLimit
 
 export type StepId = "develop" | "arch" | "qa" | "devops";
 
+export const stepIds: StepId[] = ["develop", "arch", "qa", "devops"];
+
 export type DevLoopState = {
   cardCount: number;
   index: number;
@@ -24,18 +26,29 @@ export type LoopEvent =
   | { type: "qa"; pass: boolean }
   | { type: "devops"; results: boolean[] }
   | { type: "techError" }
+  | { type: "needInput"; question: string }
+  | { type: "answer"; text: string }
   | { type: "continue"; text: string }
   | { type: "forcePass" }
   | { type: "abort" };
 
+export type WaitKind = "question" | "limit" | "pushFailed" | "techError";
+
+export type InputAction = "answer" | "continue" | "forcePass" | "abort";
+
 export type LoopAction =
   | { kind: "runStep"; nodeId: StepId; cardIndex: number; prompt: string }
-  | { kind: "waitInput"; reason: string; options: string[] }
+  | { kind: "waitInput"; reason: string; waitKind: WaitKind; fromStep: StepId; options: InputAction[] }
   | { kind: "cardDelivered"; cardIndex: number }
   | { kind: "done" }
   | { kind: "aborted" };
 
-const options = ["继续修改", "强制通过", "终止"];
+const waitOptions: Record<WaitKind, InputAction[]> = {
+  question: ["answer", "abort"],
+  limit: ["continue", "forcePass", "abort"],
+  pushFailed: ["answer", "forcePass", "abort"],
+  techError: ["answer", "abort"],
+};
 
 export function initialLoopState(cardCount: number): DevLoopState {
   return { cardCount, index: 0, phase: "develop", archRejects: 0, qaRejects: 0, techErrors: 0 };
@@ -47,11 +60,12 @@ export function nextLoop(state: DevLoopState, event: LoopEvent, cfg: LoopConfig 
   if (event.type === "start") return run(state, "develop", "开始开发");
   if (event.type === "techError") return onTechError(state);
   if (state.phase === "waiting") return onWait(state, event);
+  if (event.type === "needInput") return wait(clearTech(state), state.phase, event.question, "question");
   if (state.phase === "develop" && event.type === "stepOk") return run(clearTech(state, "arch"), "arch", "架构审核");
   if (state.phase === "arch" && event.type === "review") return onArch(state, event.pass, cfg);
   if (state.phase === "qa" && event.type === "qa") return onQa(state, event.pass, cfg);
   if (state.phase === "devops" && event.type === "devops") return onDevops(state, event.results);
-  return { state, action: runAction(state, state.phase as StepId, "保持当前步骤") };
+  return { state, action: runAction(state, state.phase, "保持当前步骤") };
 }
 
 function onArch(state: DevLoopState, pass: boolean, cfg: LoopConfig): { state: DevLoopState; action: LoopAction } {
@@ -59,7 +73,7 @@ function onArch(state: DevLoopState, pass: boolean, cfg: LoopConfig): { state: D
   const archRejects = state.archRejects + 1;
   const next = clearTech({ ...state, archRejects });
   if (archRejects <= cfg.archRejectLimit) return run(next, "develop", "架构打回，继续开发");
-  return wait(next, "arch", "架构审核超过打回上限");
+  return wait(next, "arch", "架构审核超过打回上限", "limit");
 }
 
 function onQa(state: DevLoopState, pass: boolean, cfg: LoopConfig): { state: DevLoopState; action: LoopAction } {
@@ -67,11 +81,11 @@ function onQa(state: DevLoopState, pass: boolean, cfg: LoopConfig): { state: Dev
   const qaRejects = state.qaRejects + 1;
   const next = clearTech({ ...state, qaRejects });
   if (qaRejects <= cfg.qaRejectLimit) return run(next, "develop", "QA 打回，继续开发");
-  return wait(next, "qa", "QA 超过打回上限");
+  return wait(next, "qa", "QA 超过打回上限", "limit");
 }
 
 function onDevops(state: DevLoopState, results: boolean[]): { state: DevLoopState; action: LoopAction } {
-  if (results.some((ok) => !ok)) return wait(clearTech(state), "devops", "有仓库推送失败");
+  if (results.some((ok) => !ok)) return wait(clearTech(state), "devops", "有仓库推送失败", "pushFailed");
   const deliveredIndex = state.index;
   if (state.index + 1 >= state.cardCount) {
     return {
@@ -95,18 +109,23 @@ function onDevops(state: DevLoopState, results: boolean[]): { state: DevLoopStat
 function onTechError(state: DevLoopState): { state: DevLoopState; action: LoopAction } {
   const techErrors = state.techErrors + 1;
   const phase = state.phase === "waiting" ? state.waitingFrom ?? "develop" : state.phase;
-  if (techErrors >= 2) return wait({ ...state, techErrors, waitingFrom: phase as StepId }, phase as StepId, "同一步连续技术错误");
+  if (techErrors >= 2) return wait({ ...state, techErrors, waitingFrom: phase as StepId }, phase as StepId, "同一步连续技术错误", "techError");
   return run({ ...state, techErrors }, phase as StepId, "技术错误后重试");
 }
 
 function onWait(state: DevLoopState, event: LoopEvent): { state: DevLoopState; action: LoopAction } {
+  if (event.type === "answer") {
+    const from = state.waitingFrom ?? "develop";
+    return run({ ...state, phase: from, waitingFrom: undefined }, from, `用户回复：${event.text}`);
+  }
   if (event.type === "continue") return run({ ...state, phase: "develop", waitingFrom: undefined }, "develop", `人工继续：${event.text}`);
   if (event.type === "forcePass") {
     if (state.waitingFrom === "arch") return run({ ...state, phase: "qa", waitingFrom: undefined }, "qa", "强制通过架构审核");
     if (state.waitingFrom === "qa") return run({ ...state, phase: "devops", waitingFrom: undefined }, "devops", "强制通过 QA");
     return onDevops({ ...state, phase: "devops", waitingFrom: undefined }, []);
   }
-  return { state, action: { kind: "waitInput", reason: "仍在等待输入", options } };
+  const from = state.waitingFrom ?? "develop";
+  return { state, action: { kind: "waitInput", reason: "仍在等待输入", waitKind: "limit", fromStep: from, options: waitOptions.limit } };
 }
 
 function run(state: DevLoopState, nodeId: StepId, prompt: string): { state: DevLoopState; action: LoopAction } {
@@ -117,10 +136,10 @@ function runAction(state: DevLoopState, nodeId: StepId, prompt: string): LoopAct
   return { kind: "runStep", nodeId, cardIndex: state.index, prompt };
 }
 
-function wait(state: DevLoopState, from: StepId, reason: string): { state: DevLoopState; action: LoopAction } {
+function wait(state: DevLoopState, from: StepId, reason: string, waitKind: WaitKind): { state: DevLoopState; action: LoopAction } {
   return {
     state: { ...state, phase: "waiting", waitingFrom: from, techErrors: 0 },
-    action: { kind: "waitInput", reason, options },
+    action: { kind: "waitInput", reason, waitKind, fromStep: from, options: waitOptions[waitKind] },
   };
 }
 

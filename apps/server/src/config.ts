@@ -23,6 +23,8 @@ export type GatewayConfig = {
   cursorApiKey?: string;
   opencode: { enabled: boolean; port: number; password?: string };
   fakeRuntime: boolean;
+  dispatchIntervalMs: number;
+  workflowModel: string;
 };
 
 export function defaultDataDir(platform: NodeJS.Platform = process.platform, env: Env = process.env, home = homedir()): string {
@@ -74,6 +76,8 @@ export function loadConfig(
       password: merged.OPENCODE_SERVER_PASSWORD || undefined,
     },
     fakeRuntime: merged.AGENT_RUNTIME === "fake",
+    dispatchIntervalMs: toInterval(merged.DISPATCH_INTERVAL_MS, 60_000),
+    workflowModel: merged.WORKFLOW_MODEL || "auto",
   };
 }
 
@@ -85,6 +89,11 @@ export function applyEnvFile(config: GatewayConfig, env: NodeJS.ProcessEnv = pro
 
 function definedOnly(env: Env): Env {
   return Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined && value !== ""));
+}
+
+function toInterval(value: string | undefined, fallback: number): number {
+  const ms = Number(value);
+  return Number.isInteger(ms) && ms >= 1000 ? ms : fallback;
 }
 
 function toPort(value: string | undefined, fallback: number): number {

@@ -13,20 +13,25 @@ type Workspace = {
   archived: boolean;
 };
 
-export function SettingsPage() {
+export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   const [items, setItems] = useState<Workspace[]>([]);
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
 
-  async function reload() {
+  async function load() {
     const res = await fetch("/api/workspaces", { credentials: "include" });
     if (!res.ok) return;
     setItems((await res.json()) as Workspace[]);
   }
 
+  async function reload() {
+    await load();
+    onChanged?.();
+  }
+
   useEffect(() => {
-    void reload();
+    void load();
   }, []);
 
   async function create(event: FormEvent<HTMLFormElement>) {

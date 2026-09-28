@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { openDatabase } from "../src/db.js";
+import { WorkspaceLockManager } from "../src/locks.js";
 
 const password = "correct-horse";
 
@@ -89,6 +90,15 @@ describe("运行、日志与锁", () => {
     ]);
   });
 
+  it("聊天列表可以按 workspace 过滤", async () => {
+    const root = await start();
+    const one = await session(root, "one-ws");
+    await session(root, "two-ws");
+    const filtered = await authed("GET", `/api/sessions?workspaceId=${one.workspaceId}`);
+    expect(filtered.json().map((item: { id: string }) => item.id)).toEqual([one.sessionId]);
+    expect((await authed("GET", "/api/sessions")).json()).toHaveLength(2);
+  });
+
   it("同一个 workspace 上并发的第二次运行返回 409", async () => {
     const root = await start();
     const first = await session(root, "shared");
@@ -133,6 +143,37 @@ describe("openDatabase locks table", () => {
     const db = openDatabase(join(dir, "gateway.db"));
     const row = db.prepare("SELECT name FROM sqlite_master WHERE name = 'workspace_locks'").get();
     expect(row).toBeTruthy();
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("聊天锁和工作流锁互不阻塞，同一种锁互斥", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-lock-"));
+    const db = openDatabase(join(dir, "gateway.db"));
+    const locks = new WorkspaceLockManager(db);
+    expect(locks.tryAcquire("ws", "chat", { type: "run", id: "r1" }).ok).toBe(true);
+    expect(locks.tryAcquire("ws", "workflow", { type: "workflow", id: "ws" }).ok).toBe(true);
+    const blocked = locks.tryAcquire("ws", "chat", { type: "run", id: "r2" });
+    expect(blocked).toEqual({ ok: false, holder: { type: "run", id: "r1" } });
+    expect(locks.tryAcquire("ws", "workflow", { type: "workflow", id: "ws" }).ok).toBe(true);
+    expect(locks.tryAcquire("ws", "workflow", { type: "workflow", id: "other" }).ok).toBe(false);
+    locks.release("ws", "chat", "r1");
+    expect(locks.tryAcquire("ws", "chat", { type: "run", id: "r2" }).ok).toBe(true);
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("旧版锁表没有 kind 列时重建", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-lock-"));
+    const file = join(dir, "gateway.db");
+    const legacy = new DatabaseSync(file);
+    legacy.exec(
+      "CREATE TABLE workspace_locks (workspace_id TEXT PRIMARY KEY, holder_type TEXT NOT NULL, holder_id TEXT NOT NULL, acquired_at INTEGER NOT NULL)",
+    );
+    legacy.close();
+    const db = openDatabase(file);
+    const columns = db.prepare("PRAGMA table_info(workspace_locks)").all() as { name: string }[];
+    expect(columns.map((item) => item.name)).toContain("kind");
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

@@ -1,5 +1,6 @@
 import type { GatewayEvent } from "@gateway/shared";
-import type { AgentRuntime, RunContext } from "../runs.js";
+import type { AgentRuntime, GatewayTool, RunContext } from "../runs.js";
+import { cursorAccess, withRules, type CursorAccess } from "./access.js";
 import { classifyCursorFailure, mapCursorEvent, type CursorStreamEvent, type ModelInfo } from "./map.js";
 
 export type CursorRun = {
@@ -8,28 +9,42 @@ export type CursorRun = {
   cancel: () => Promise<void>;
 };
 
+export type CursorSendOptions = {
+  model: { id: string };
+  mode: CursorAccess["mode"];
+  customTools?: Record<string, GatewayTool>;
+};
+
 export type CursorAgent = {
   agentId: string;
-  send: (prompt: string, options: { model: { id: string } }) => Promise<CursorRun>;
+  send: (prompt: string, options: CursorSendOptions) => Promise<CursorRun>;
 };
+
+export type CursorAgentOptions = { cwd: string; model: string; access: CursorAccess };
 
 export type CursorSdk = {
   models: ModelInfo[];
-  create: (cwd: string, model: string) => Promise<CursorAgent>;
-  resume: (agentId: string, cwd: string) => Promise<CursorAgent>;
+  create: (options: CursorAgentOptions) => Promise<CursorAgent>;
+  resume: (agentId: string, options: CursorAgentOptions) => Promise<CursorAgent>;
 };
 
-export function createCursorRuntime(sdk: CursorSdk, remember: (sessionId: string, agentId: string) => void, lookup: (sessionId: string) => string | null): AgentRuntime {
+export function createCursorRuntime(sdk: CursorSdk): AgentRuntime {
   return {
     async listModels() {
       return sdk.models;
     },
     async startRun(input, emit, signal) {
       try {
-        const existing = lookup(input.sessionId);
-        const agent = existing ? await sdk.resume(existing, input.cwd) : await sdk.create(input.cwd, input.model);
-        remember(input.sessionId, agent.agentId);
-        const run = await agent.send(input.prompt, { model: { id: input.model } });
+        const profile = input.access ?? "chat";
+        const access = cursorAccess[profile];
+        const options = { cwd: input.cwd, model: input.model, access };
+        const agent = input.agentId ? await sdk.resume(input.agentId, options) : await sdk.create(options);
+        if (agent.agentId !== input.agentId) input.onAgent?.(agent.agentId);
+        const run = await agent.send(withRules(profile, input.prompt), {
+          model: { id: input.model },
+          mode: access.mode,
+          customTools: input.customTools,
+        });
         const onAbort = () => void run.cancel();
         signal?.addEventListener("abort", onAbort);
         for await (const event of run.stream()) {

@@ -121,6 +121,45 @@ describe("cursor-dev-loop", () => {
     const aborted = nextLoop(state, { type: "abort" }, cfg);
     expect(aborted.action.kind).toBe("aborted");
   });
+
+  it("任何步骤提问都会暂停，回答后回到提问的那一步", () => {
+    const developing = nextLoop(initialLoopState(1), { type: "start" }, cfg).state;
+    const asked = nextLoop(developing, { type: "needInput", question: "用 SQLite 还是 JSON？" }, cfg);
+    expect(asked.action).toMatchObject({
+      kind: "waitInput",
+      waitKind: "question",
+      fromStep: "develop",
+      reason: "用 SQLite 还是 JSON？",
+      options: ["answer", "abort"],
+    });
+    const answered = nextLoop(asked.state, { type: "answer", text: "SQLite" }, cfg);
+    expect(answered.action).toMatchObject({ kind: "runStep", nodeId: "develop", prompt: expect.stringContaining("SQLite") });
+
+    const qa = reachQa(initialLoopState(1));
+    const qaAsked = nextLoop(qa, { type: "needInput", question: "测试环境在哪？" }, cfg);
+    expect(qaAsked.state.waitingFrom).toBe("qa");
+    const qaAnswered = nextLoop(qaAsked.state, { type: "answer", text: "本地" }, cfg);
+    expect(qaAnswered.action).toMatchObject({ kind: "runStep", nodeId: "qa" });
+    expect(qaAnswered.state.qaRejects).toBe(0);
+  });
+
+  it("超限暂停可以继续修改或强制通过，推送失败可以重试 DevOps", () => {
+    let state = reachQa(initialLoopState(1));
+    for (let i = 0; i < 3; i++) {
+      state = nextLoop(state, { type: "qa", pass: false }, cfg).state;
+      if (state.phase === "develop") {
+        state = nextLoop(state, { type: "stepOk" }, cfg).state;
+        state = nextLoop(state, { type: "review", pass: true }, cfg).state;
+      }
+    }
+    expect(state.phase).toBe("waiting");
+    const pushFailed = nextLoop(reachDevops(initialLoopState(1)), { type: "devops", results: [false] }, cfg);
+    expect(pushFailed.action).toMatchObject({ kind: "waitInput", waitKind: "pushFailed", fromStep: "devops" });
+    const retried = nextLoop(pushFailed.state, { type: "answer", text: "网络好了" }, cfg);
+    expect(retried.action).toMatchObject({ kind: "runStep", nodeId: "devops" });
+    const forced = nextLoop(pushFailed.state, { type: "forcePass" }, cfg);
+    expect(forced.state.phase).toBe("done");
+  });
 });
 
 function passRest(state: DevLoopState, _card: number): DevLoopState {

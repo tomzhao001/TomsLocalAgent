@@ -20,7 +20,12 @@ export function createOpenCodeRuntime(client: OpenCodeClient): AgentRuntime {
       return client.models;
     },
     async startRun(input, emit, signal) {
-      const ocSession = await client.ensureSession(input.sessionId, input.cwd);
+      if (input.access && input.access !== "chat") {
+        emit({ type: "error", message: "OpenCode 只能用于只读聊天" });
+        return "error";
+      }
+      const ocSession = input.agentId ?? (await client.ensureSession(input.sessionId, input.cwd));
+      if (ocSession !== input.agentId) input.onAgent?.(ocSession);
       const seen = new Set<string>();
       await client.prompt({ sessionId: ocSession, directory: input.cwd, model: input.model, text: input.prompt });
       const onAbort = () => void client.abort(ocSession);

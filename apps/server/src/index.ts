@@ -9,14 +9,10 @@ applyEnvFile(config);
 mkdirSync(config.logDir, { recursive: true });
 
 const runtimes: Partial<Record<string, AgentRuntime>> = {};
-const memory = new Map<string, string>();
 let opencode: OpenCodeHandle | null = null;
 
 if (!config.fakeRuntime && config.cursorApiKey) {
-  runtimes.cursor = await loadCursorRuntime(config.cursorApiKey, {
-    get: (id) => memory.get(id) ?? null,
-    set: (id, agentId) => memory.set(id, agentId),
-  });
+  runtimes.cursor = await loadCursorRuntime(config.cursorApiKey);
 }
 if (!config.fakeRuntime && config.opencode.enabled) {
   if (config.opencode.password) process.env.OPENCODE_SERVER_PASSWORD = config.opencode.password;
@@ -38,6 +34,8 @@ const app = await buildApp({
   webDir: config.webDir,
   agentRuntime: config.fakeRuntime ? "fake" : undefined,
   runtimes,
+  dispatchIntervalMs: config.dispatchIntervalMs,
+  workflowModel: config.workflowModel,
 });
 
 let closing = false;

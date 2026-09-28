@@ -1,20 +1,16 @@
-import type { AgentRuntime } from "../runs.js";
-import { createCursorRuntime, type CursorSdk } from "./cursor.js";
+import type { AgentRuntime, GatewayTool } from "../runs.js";
+import { opencodeReadonly } from "./access.js";
+import { createCursorRuntime, type CursorAgentOptions, type CursorSdk, type CursorSendOptions } from "./cursor.js";
 import { createOpenCodeRuntime } from "./opencode.js";
 import { cachedModels, flattenOpenCodeModels } from "./map.js";
 
-type Memory = {
-  get(sessionId: string): string | null;
-  set(sessionId: string, agentId: string): void;
-};
-
-export async function loadCursorRuntime(apiKey: string, memory: Memory): Promise<AgentRuntime> {
+export async function loadCursorRuntime(apiKey: string): Promise<AgentRuntime> {
   const sdk = (await import("@cursor/sdk")) as any;
   const models = cachedModels(async () => {
     const listed = await sdk.Cursor.models.list({ apiKey });
     return (listed ?? []).map((item: { id: string; name?: string }) => ({ id: item.id, label: item.name ?? item.id }));
   });
-  const cursor = createCursorRuntime(adapt(sdk, apiKey), (sessionId, agentId) => memory.set(sessionId, agentId), (sessionId) => memory.get(sessionId));
+  const cursor = createCursorRuntime(adapt(sdk, apiKey));
   return { ...cursor, listModels: models };
 }
 
@@ -22,7 +18,12 @@ export type OpenCodeHandle = { runtime: AgentRuntime; close: () => void };
 
 export async function loadOpenCodeRuntime(options: { port: number; password?: string }): Promise<OpenCodeHandle> {
   const sdk = (await import("@opencode-ai/sdk")) as any;
-  const server = await sdk.createOpencodeServer({ hostname: "127.0.0.1", port: options.port, timeout: 20_000 });
+  const server = await sdk.createOpencodeServer({
+    hostname: "127.0.0.1",
+    port: options.port,
+    timeout: 20_000,
+    config: { permission: opencodeReadonly.permission },
+  });
   const headers: Record<string, string> = {};
   if (options.password) {
     const user = process.env.OPENCODE_SERVER_USERNAME || "opencode";
@@ -38,7 +39,12 @@ export async function loadOpenCodeRuntime(options: { port: number; password?: st
       await client.session.promptAsync({
         path: { id: input.sessionId },
         query: { directory: input.directory },
-        body: { model: { providerID, modelID }, parts: [{ type: "text", text: input.text }] },
+        body: {
+          model: { providerID, modelID },
+          agent: opencodeReadonly.agent,
+          tools: opencodeReadonly.tools,
+          parts: [{ type: "text", text: input.text }],
+        },
       });
     },
     async *events(sessionId) {
@@ -65,15 +71,20 @@ export async function loadOpenCodeRuntime(options: { port: number; password?: st
 }
 
 function adapt(sdk: any, apiKey: string): CursorSdk {
+  const agentOptions = (options: CursorAgentOptions) => ({
+    apiKey,
+    model: { id: options.model },
+    mode: options.access.mode,
+    ...(options.access.tools ? { tools: options.access.tools } : {}),
+    local: { cwd: options.cwd },
+  });
   return {
     models: [],
-    async create(cwd, model) {
-      const agent = await sdk.Agent.create({ apiKey, model: { id: model }, local: { cwd } });
-      return wrap(agent);
+    async create(options) {
+      return wrap(await sdk.Agent.create(agentOptions(options)));
     },
-    async resume(agentId) {
-      const agent = await sdk.Agent.resume(agentId, { apiKey });
-      return wrap(agent);
+    async resume(agentId, options) {
+      return wrap(await sdk.Agent.resume(agentId, agentOptions(options)));
     },
   };
 }
@@ -81,8 +92,12 @@ function adapt(sdk: any, apiKey: string): CursorSdk {
 function wrap(agent: any) {
   return {
     agentId: agent.agentId as string,
-    async send(prompt: string, options: { model: { id: string } }) {
-      const run = await agent.send(prompt, { model: options.model });
+    async send(prompt: string, options: CursorSendOptions) {
+      const run = await agent.send(prompt, {
+        model: options.model,
+        mode: options.mode,
+        ...(options.customTools ? { local: { customTools: toSdkTools(options.customTools) } } : {}),
+      });
       return {
         stream: () => run.stream(),
         wait: () => run.wait(),
@@ -90,6 +105,15 @@ function wrap(agent: any) {
       };
     },
   };
+}
+
+function toSdkTools(tools: Record<string, GatewayTool>) {
+  return Object.fromEntries(
+    Object.entries(tools).map(([name, tool]) => [
+      name,
+      { description: tool.description, inputSchema: tool.inputSchema, execute: (args: Record<string, unknown>) => tool.execute(args) },
+    ]),
+  );
 }
 
 function splitModel(model: string): [string, string] {

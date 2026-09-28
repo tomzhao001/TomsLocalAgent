@@ -1,16 +1,26 @@
-import { useEffect, useState } from "react";
-import { WorkflowBoard } from "./components/WorkflowBoard";
+import { ArrowLeft, Settings } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { StatusDot, WorkspaceSwitcher, attentionOf, sortWorkspaces } from "./components/WorkspaceSwitcher";
+import { api, type Workspace, type WorkspaceStatus } from "./lib/api";
+import { usePolling } from "./lib/usePolling";
 import { ChatPage } from "./pages/Chat";
 import { LoginPage } from "./pages/Login";
 import { SettingsPage } from "./pages/Settings";
+import { WorkflowPage } from "./pages/Workflow";
+
+const storageKey = "gateway.workspace";
 
 export function App() {
   const [username, setUsername] = useState<string | null | undefined>(undefined);
-  const [page, setPage] = useState<"chat" | "settings" | "workflow">("chat");
-  const [flowStatus, setFlowStatus] = useState<"running" | "waiting_input">("running");
+  const [page, setPage] = useState<"workspace" | "settings">("workspace");
+  const [tab, setTab] = useState<"chat" | "workflow">("chat");
+  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
+  const [statuses, setStatuses] = useState<WorkspaceStatus[]>([]);
+  const [workspaceId, setWorkspaceId] = useState(() => localStorage.getItem(storageKey) ?? "");
 
   async function refresh() {
     const res = await fetch("/api/me", { credentials: "include" });
@@ -21,78 +31,117 @@ export function App() {
     void refresh();
   }, []);
 
+  const loadStatuses = useCallback(async () => {
+    try {
+      setStatuses(await api<WorkspaceStatus[]>("/api/workflow/status"));
+    } catch {
+      // 下一轮轮询再试
+    }
+  }, []);
+
+  const loadWorkspaces = useCallback(async () => {
+    const items = (await api<Workspace[]>("/api/workspaces")).filter((item) => !item.archived);
+    setWorkspaces(items);
+    await loadStatuses();
+  }, [loadStatuses]);
+
+  useEffect(() => {
+    if (username) void loadWorkspaces();
+  }, [username, loadWorkspaces]);
+
+  usePolling(loadStatuses, 10_000, Boolean(username));
+
+  useEffect(() => {
+    if (!workspaces || workspaces.length === 0) return;
+    if (!workspaces.some((item) => item.id === workspaceId)) {
+      selectWorkspace(sortWorkspaces(workspaces, statuses)[0]!.id);
+    }
+  }, [workspaces, workspaceId, statuses]);
+
+  function selectWorkspace(id: string) {
+    setWorkspaceId(id);
+    localStorage.setItem(storageKey, id);
+  }
+
   if (username === undefined) return <p className="p-8 text-sm text-muted-foreground">加载中…</p>;
   if (!username) return <LoginPage onLoggedIn={(name) => setUsername(name)} />;
+
+  const current = statuses.find((item) => item.workspaceId === workspaceId);
+  const needsYou = attentionOf(current) === "waiting";
 
   return (
     <div className="flex min-h-svh flex-col">
       <header className="flex items-center gap-2 border-b px-4 py-3">
-        <strong className="mr-2 text-sm">AI Gateway</strong>
-        <Button type="button" size="sm" variant={page === "chat" ? "default" : "ghost"} onClick={() => setPage("chat")}>
-          聊天
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={page === "workflow" ? "default" : "ghost"}
-          onClick={() => setPage("workflow")}
-        >
-          工作流
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={page === "settings" ? "default" : "ghost"}
-          onClick={() => setPage("settings")}
-        >
-          设置
-        </Button>
-        <Separator orientation="vertical" className="mx-1 h-5" />
-        <Badge variant="secondary" className="ml-auto">
-          {username}
-        </Badge>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            void fetch("/api/logout", { method: "POST", credentials: "include" }).then(() => setUsername(null));
-          }}
-        >
-          退出
-        </Button>
+        <strong className="mr-1 hidden text-sm sm:inline">AI Gateway</strong>
+        {page === "settings" ? (
+          <Button type="button" size="sm" variant="ghost" onClick={() => setPage("workspace")}>
+            <ArrowLeft data-icon="inline-start" />
+            返回
+          </Button>
+        ) : workspaces && workspaces.length > 0 ? (
+          <WorkspaceSwitcher workspaces={workspaces} statuses={statuses} value={workspaceId} onChange={selectWorkspace} />
+        ) : null}
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            type="button"
+            size="icon-sm"
+            variant={page === "settings" ? "secondary" : "ghost"}
+            aria-label="设置"
+            onClick={() => setPage(page === "settings" ? "workspace" : "settings")}
+          >
+            <Settings />
+          </Button>
+          <Badge variant="secondary" className="hidden sm:inline-flex">
+            {username}
+          </Badge>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              void fetch("/api/logout", { method: "POST", credentials: "include" }).then(() => setUsername(null));
+            }}
+          >
+            退出
+          </Button>
+        </div>
       </header>
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col p-4">
-        {page === "settings" ? <SettingsPage /> : null}
-        {page === "chat" ? <ChatPage /> : null}
-        {page === "workflow" ? (
-          <section className="flex flex-col gap-3">
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={flowStatus === "running" ? "default" : "outline"}
-                onClick={() => setFlowStatus("running")}
-              >
-                运行中
+        {page === "settings" ? <SettingsPage onChanged={() => void loadWorkspaces()} /> : null}
+        {page === "workspace" && workspaces && workspaces.length === 0 ? (
+          <Card className="mx-auto w-full max-w-md">
+            <CardHeader>
+              <CardTitle>还没有 Workspace</CardTitle>
+              <CardDescription>先在设置里添加一个本机目录，之后就能在这里聊天和运行工作流。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button type="button" onClick={() => setPage("settings")}>
+                去设置
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={flowStatus === "waiting_input" ? "default" : "outline"}
-                onClick={() => setFlowStatus("waiting_input")}
-              >
-                等待输入
-              </Button>
-            </div>
-            <WorkflowBoard
-              status={flowStatus}
-              phase={flowStatus === "running" ? "develop" : "arch"}
-              archRejects={flowStatus === "waiting_input" ? 4 : 1}
-              qaRejects={0}
-              holder={flowStatus === "running" ? "工作流 #12" : undefined}
-            />
-          </section>
+            </CardContent>
+          </Card>
+        ) : null}
+        {page === "workspace" && workspaceId && workspaces?.some((item) => item.id === workspaceId) ? (
+          <Tabs value={tab} onValueChange={(value) => setTab(value as "chat" | "workflow")} className="flex-1">
+            <TabsList>
+              <TabsTrigger value="chat">聊天</TabsTrigger>
+              <TabsTrigger value="workflow">
+                工作流
+                <StatusDot attention={needsYou ? "waiting" : "idle"} label="有事项等你处理" />
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="chat" forceMount className="flex flex-col data-[state=inactive]:hidden">
+              <ChatPage key={workspaceId} workspaceId={workspaceId} onSplitStarted={() => setTab("workflow")} />
+            </TabsContent>
+            <TabsContent value="workflow" forceMount className="flex flex-col data-[state=inactive]:hidden">
+              <WorkflowPage
+                key={workspaceId}
+                workspaceId={workspaceId}
+                active={tab === "workflow"}
+                onChanged={() => void loadStatuses()}
+              />
+            </TabsContent>
+          </Tabs>
         ) : null}
       </main>
     </div>

@@ -5,72 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { discoverWorkflows } from "../src/workflows/_framework/registry.js";
 import { acceptRequirements } from "../src/workflows/_framework/split.js";
-import { runLoop } from "../src/workflows/_framework/engine.js";
-import { WorkspaceLockManager } from "../src/locks.js";
-import { openDatabase } from "../src/db.js";
-import type { LoopAction, LoopEvent } from "../src/workflows/cursor-dev-loop/next.js";
+import { parseResultBlock, stepTools, toLoopEvent, type StepResult } from "../src/workflows/_framework/result.js";
 
-const passing = async (action: Extract<LoopAction, { kind: "runStep" }>): Promise<LoopEvent> => {
-  if (action.nodeId === "develop") return { type: "stepOk" };
-  if (action.nodeId === "arch") return { type: "review", pass: true };
-  if (action.nodeId === "qa") return { type: "qa", pass: true };
-  return { type: "devops", results: [true] };
-};
-
-describe("工作流引擎", () => {
+describe("工作流框架", () => {
   let dir: string;
   afterEach(async () => {
     if (dir) await rm(dir, { recursive: true, force: true });
-  });
-
-  it("假执行器跑完两张卡", async () => {
-    const seen: number[] = [];
-    const result = await runLoop({
-      cardCount: 2,
-      execute: async (action) => {
-        if (action.nodeId === "develop") seen.push(action.cardIndex);
-        return passing(action);
-      },
-    });
-    expect(seen).toEqual([0, 1]);
-    expect(result.status).toBe("done");
-  });
-
-  it("架构第 4 次不通过停在 waiting_input 且不释放锁", async () => {
-    dir = await mkdtemp(join(tmpdir(), "gw-eng-"));
-    const db = openDatabase(join(dir, "gateway.db"));
-    const locks = new WorkspaceLockManager(db);
-    expect(locks.tryAcquire("ws", { type: "workflow", id: "wf" }).ok).toBe(true);
-    const result = await runLoop({
-      cardCount: 1,
-      execute: async (action) => {
-        if (action.nodeId === "arch") return { type: "review", pass: false };
-        return { type: "stepOk" };
-      },
-    });
-    expect(result.status).toBe("waiting_input");
-    expect(result.state.archRejects).toBe(4);
-    expect(locks.tryAcquire("ws", { type: "run", id: "other" }).ok).toBe(false);
-    db.close();
-  });
-
-  it("重启后从暂停的步骤继续，而不是从头", async () => {
-    const paused = await runLoop({
-      cardCount: 1,
-      execute: async (action) => (action.nodeId === "arch" ? { type: "review", pass: false } : { type: "stepOk" }),
-    });
-    let calls = 0;
-    const resumed = await runLoop({
-      cardCount: 1,
-      resume: paused.state,
-      execute: async () => {
-        calls += 1;
-        return { type: "stepOk" };
-      },
-    });
-    expect(calls).toBe(0);
-    expect(resumed.state.archRejects).toBe(4);
-    expect(resumed.state.index).toBe(0);
   });
 
   it("注册表发现 cursor-dev-loop，忽略没有 index.ts 的目录", async () => {
@@ -92,5 +32,30 @@ describe("工作流引擎", () => {
       cards: [{ title: "标题", goal: "改文案", context: "首页", acceptanceCriteria: ["文案更新"] }],
     });
     expect(good.ok).toBe(true);
+  });
+
+  it("submit_verdict 和 ask_user 记录结果，参数不对时报错", async () => {
+    const seen: StepResult[] = [];
+    const tools = stepTools((result) => seen.push(result));
+    await tools.submit_verdict!.execute({ verdict: "reject", comments: "命名不清" });
+    await tools.ask_user!.execute({ question: "用哪个数据库？" });
+    const bad = await tools.submit_verdict!.execute({ verdict: "maybe" });
+    expect(seen).toEqual([
+      { verdict: "reject", comments: "命名不清" },
+      { verdict: "need_input", question: "用哪个数据库？" },
+    ]);
+    expect(bad).toMatchObject({ isError: true });
+  });
+
+  it("文本结果块兜底，结果按步骤转成状态机事件", () => {
+    const parsed = parseResultBlock(['做完了\n<gateway-result>{"verdict":"pass","comments":"ok"}</gateway-result>']);
+    expect(parsed).toEqual({ verdict: "pass", comments: "ok" });
+    expect(parseResultBlock(["没有结果块"])).toBeNull();
+    expect(toLoopEvent("develop", parsed)).toEqual({ type: "stepOk" });
+    expect(toLoopEvent("arch", { verdict: "reject", comments: "" })).toEqual({ type: "review", pass: false });
+    expect(toLoopEvent("qa", { verdict: "pass", comments: "" })).toEqual({ type: "qa", pass: true });
+    expect(toLoopEvent("devops", { verdict: "reject", comments: "" })).toEqual({ type: "devops", results: [false] });
+    expect(toLoopEvent("develop", { verdict: "need_input", question: "?" })).toEqual({ type: "needInput", question: "?" });
+    expect(toLoopEvent("qa", null)).toEqual({ type: "techError" });
   });
 });
