@@ -87,10 +87,22 @@ describe("工作流接口", () => {
     const history = (await authed("GET", `/api/workspaces/${ws}/requirements?scope=history`)).json();
     expect(history).toMatchObject({ hasMore: false, items: [{ id: created.json().id, status: "delivered" }] });
     const detail = (await authed("GET", `/api/requirements/${created.json().id}`)).json();
-    expect(detail.steps.map((step: { step: string }) => step.step)).toEqual(["develop", "review", "devops"]);
+    expect(detail.steps.map((step: { step: string }) => step.step)).toEqual(["plan", "develop", "review", "devops"]);
+    expect(detail.workflowId).toBe("cursor-dev-loop");
     const log = (await authed("GET", `/api/step-runs/${detail.steps[0].id}/log?offset=0`)).json();
     expect(log.status).toBe("finished");
     expect(log.events.at(-1)).toEqual({ type: "done", status: "finished" });
+  });
+
+  it("手动新增可以选择 QA 工作流，通过后只有 QA 步骤", async () => {
+    const ws = await start();
+    const created = await authed("POST", `/api/workspaces/${ws}/requirements`, { ...card("只测"), workflow: "cursor-qa" });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().workflowId).toBe("cursor-qa");
+    await tick(2);
+    const detail = (await authed("GET", `/api/requirements/${created.json().id}`)).json();
+    expect(detail).toMatchObject({ status: "delivered", workflowId: "cursor-qa" });
+    expect(detail.steps.map((step: { step: string }) => step.step)).toEqual(["qa"]);
   });
 
   it("等待输入时提交回答，非法操作返回 409", async () => {
@@ -117,7 +129,7 @@ describe("工作流接口", () => {
     expect((await authed("POST", `/api/requirements/${id}/input`, { action: "answer" })).statusCode).toBe(400);
     expect((await authed("POST", `/api/requirements/${id}/input`, { action: "forcePass" })).statusCode).toBe(409);
     const answered = await authed("POST", `/api/requirements/${id}/input`, { action: "answer", text: "要" });
-    expect(answered.json()).toMatchObject({ status: "running", phase: "develop" });
+    expect(answered.json()).toMatchObject({ status: "running", phase: "plan" });
   });
 
   it("拆卡生成草稿，确认后按顺序追加到队尾", async () => {

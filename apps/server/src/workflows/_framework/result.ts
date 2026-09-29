@@ -71,6 +71,7 @@ export function toLoopEvent(step: StepId, result: StepResult | null): LoopEvent 
   if (result.verdict === "need_input") return { type: "needInput", question: result.question };
   if (result.verdict === "reject" && !result.comments.trim()) return { type: "techError" };
   const pass = result.verdict === "pass";
+  if (step === "plan" && !pass) return { type: "techError" };
   if (step === "review") return { type: "review", pass };
   if (step === "devops") return { type: "devops", results: [pass] };
   return { type: "stepOk" };

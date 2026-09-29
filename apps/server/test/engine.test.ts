@@ -54,6 +54,8 @@ describe("工作流框架", () => {
     expect(parsed).toEqual({ verdict: "pass", comments: "ok" });
     expect(parseResultBlock(["没有结果块"])).toBeNull();
     expect(toLoopEvent("develop", parsed)).toEqual({ type: "stepOk" });
+    expect(toLoopEvent("plan", { verdict: "pass", comments: "先写失败测试" })).toEqual({ type: "stepOk" });
+    expect(toLoopEvent("plan", { verdict: "reject", comments: "计划不行" })).toEqual({ type: "techError" });
     expect(toLoopEvent("review", { verdict: "reject", comments: "" })).toEqual({ type: "techError" });
     expect(toLoopEvent("review", { verdict: "reject", comments: "补上权限检查" })).toEqual({ type: "review", pass: false });
     expect(toLoopEvent("review", { verdict: "pass", comments: "" })).toEqual({ type: "review", pass: true });

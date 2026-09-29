@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultLoopConfig, initialLoopState, nextLoop, normalizeLoopState, type DevLoopState, type LoopConfig, type LoopEvent } from "../src/workflows/cursor-dev-loop/next.js";
+import { initialQaState, nextQa, normalizeQaState } from "../src/workflows/cursor-qa/next.js";
 
 const cfg = defaultLoopConfig;
 
@@ -13,40 +14,53 @@ describe("cursor-dev-loop", () => {
   it("五张卡严格按序，前一张交付后才进入下一张", () => {
     let state = initialLoopState(5);
     for (let card = 0; card < 5; card++) {
-      const started = nextLoop(state, card === 0 ? { type: "start" } : { type: "stepOk" }, cfg);
-      expect(started.action).toMatchObject({ kind: "runStep", nodeId: card === 0 ? "develop" : "review", cardIndex: card });
-      state = passRest(card === 0 ? started.state : state, card);
+      if (card === 0) {
+        const started = nextLoop(state, { type: "start" }, cfg);
+        expect(started.action).toMatchObject({ kind: "runStep", nodeId: "plan", cardIndex: 0 });
+        state = started.state;
+      }
+      expect(state).toMatchObject({ phase: "plan", index: card });
+      state = nextLoop(state, { type: "stepOk" }, cfg).state;
+      expect(state.phase).toBe("develop");
+      state = nextLoop(state, { type: "stepOk" }, cfg).state;
+      state = nextLoop(state, { type: "review", pass: true }, cfg).state;
+      state = nextLoop(state, { type: "devops", results: [true] }, cfg).state;
       expect(state.index).toBe(Math.min(card + 1, 4));
     }
     expect(state.phase).toBe("done");
   });
 
   it.each([
-    [1, "develop"],
-    [2, "develop"],
-    [3, "develop"],
+    [1, "plan"],
+    [2, "plan"],
+    [3, "plan"],
     [4, "waiting"],
   ] as const)("Review 第 %i 次不通过后阶段是 %s", (fails, phase) => {
-    let state = nextLoop(initialLoopState(1), { type: "start" }, cfg).state;
-    state = nextLoop(state, { type: "stepOk" }, cfg).state;
+    let state = reachReview(initialLoopState(1));
     for (let i = 0; i < fails; i++) {
       const result = nextLoop(state, { type: "review", pass: false }, cfg);
       state = result.state;
-      if (i < fails - 1) state = nextLoop(state, { type: "stepOk" }, cfg).state;
+      if (i < fails - 1) {
+        state = nextLoop(state, { type: "stepOk" }, cfg).state;
+        state = nextLoop(state, { type: "stepOk" }, cfg).state;
+      }
     }
     expect(state.phase).toBe(phase);
     expect(state.reviewRejects).toBe(fails);
   });
 
   it("手动放行后再次不通过仍然暂停", () => {
-    let state = drive([{ type: "start" }, { type: "stepOk" }]);
+    let state = reachReview(initialLoopState(1));
     for (let i = 0; i < 3; i++) {
       state = nextLoop(state, { type: "review", pass: false }, cfg).state;
+      state = nextLoop(state, { type: "stepOk" }, cfg).state;
       state = nextLoop(state, { type: "stepOk" }, cfg).state;
     }
     const paused = nextLoop(state, { type: "review", pass: false }, cfg);
     expect(paused.action.kind).toBe("waitInput");
-    const again = nextLoop(nextLoop(paused.state, { type: "continue", text: "再改" }, cfg).state, { type: "stepOk" }, cfg);
+    const continued = nextLoop(paused.state, { type: "continue", text: "再改" }, cfg);
+    expect(continued.action).toMatchObject({ nodeId: "plan" });
+    const again = nextLoop(nextLoop(continued.state, { type: "stepOk" }, cfg).state, { type: "stepOk" }, cfg);
     const second = nextLoop(again.state, { type: "review", pass: false }, cfg);
     expect(second.action.kind).toBe("waitInput");
     expect(second.state.reviewRejects).toBe(5);
@@ -54,11 +68,11 @@ describe("cursor-dev-loop", () => {
 
   it("上限用配置，超过上限后的暂停不能被额外开关关掉", () => {
     const custom = { reviewRejectLimit: 1 };
-    let state = nextLoop(initialLoopState(1), { type: "start" }, custom).state;
-    state = nextLoop(state, { type: "stepOk" }, custom).state;
+    let state = reachReview(initialLoopState(1), custom);
     state = nextLoop(state, { type: "review", pass: false }, custom).state;
-    const paused = nextLoop(state, { type: "stepOk" }, custom);
-    const again = nextLoop(paused.state, { type: "review", pass: false }, { ...custom, reviewRejectLimit: 1 });
+    state = nextLoop(state, { type: "stepOk" }, custom).state;
+    state = nextLoop(state, { type: "stepOk" }, custom).state;
+    const again = nextLoop(state, { type: "review", pass: false }, custom);
     expect(again.action.kind).toBe("waitInput");
   });
 
@@ -67,28 +81,30 @@ describe("cursor-dev-loop", () => {
     expect(failed.action.kind).toBe("waitInput");
     expect(failed.state.index).toBe(0);
     const ok = nextLoop(reachDevops(initialLoopState(2)), { type: "devops", results: [true, true] }, cfg);
-    expect(ok.action).toMatchObject({ kind: "runStep", cardIndex: 1 });
+    expect(ok.action).toMatchObject({ kind: "runStep", nodeId: "plan", cardIndex: 1 });
   });
 
   it("技术错误不计入打回，连续两次才暂停", () => {
     let state = nextLoop(initialLoopState(1), { type: "start" }, cfg).state;
     const once = nextLoop(state, { type: "techError" }, cfg);
-    expect(once.action).toMatchObject({ nodeId: "develop" });
+    expect(once.action).toMatchObject({ nodeId: "plan" });
     expect(once.state.reviewRejects).toBe(0);
     const twice = nextLoop(once.state, { type: "techError" }, cfg);
     expect(twice.action.kind).toBe("waitInput");
   });
 
   it("人工继续、强制通过和终止", () => {
-    let state = nextLoop(initialLoopState(1), { type: "start" }, cfg).state;
-    state = nextLoop(state, { type: "stepOk" }, cfg).state;
+    let state = reachReview(initialLoopState(1));
     for (let i = 0; i < 4; i++) {
       const step = nextLoop(state, { type: "review", pass: false }, cfg);
       state = step.state;
-      if (step.action.kind === "runStep") state = nextLoop(state, { type: "stepOk" }, cfg).state;
+      if (step.action.kind === "runStep") {
+        state = nextLoop(state, { type: "stepOk" }, cfg).state;
+        state = nextLoop(state, { type: "stepOk" }, cfg).state;
+      }
     }
     const continued = nextLoop(state, { type: "continue", text: "看这里" }, cfg);
-    expect(continued.action).toMatchObject({ nodeId: "develop", prompt: expect.stringContaining("看这里") });
+    expect(continued.action).toMatchObject({ nodeId: "plan", prompt: expect.stringContaining("看这里") });
     const forced = nextLoop(state, { type: "forcePass" }, cfg);
     expect(forced.action).toMatchObject({ nodeId: "devops" });
     const aborted = nextLoop(state, { type: "abort" }, cfg);
@@ -96,17 +112,17 @@ describe("cursor-dev-loop", () => {
   });
 
   it("任何步骤提问都会暂停，回答后回到提问的那一步", () => {
-    const developing = nextLoop(initialLoopState(1), { type: "start" }, cfg).state;
-    const asked = nextLoop(developing, { type: "needInput", question: "用 SQLite 还是 JSON？" }, cfg);
+    const planning = nextLoop(initialLoopState(1), { type: "start" }, cfg).state;
+    const asked = nextLoop(planning, { type: "needInput", question: "用 SQLite 还是 JSON？" }, cfg);
     expect(asked.action).toMatchObject({
       kind: "waitInput",
       waitKind: "question",
-      fromStep: "develop",
+      fromStep: "plan",
       reason: "用 SQLite 还是 JSON？",
       options: ["answer", "abort"],
     });
     const answered = nextLoop(asked.state, { type: "answer", text: "SQLite" }, cfg);
-    expect(answered.action).toMatchObject({ kind: "runStep", nodeId: "develop", prompt: expect.stringContaining("SQLite") });
+    expect(answered.action).toMatchObject({ kind: "runStep", nodeId: "plan", prompt: expect.stringContaining("SQLite") });
 
     const reviewing = reachReview(initialLoopState(1));
     const reviewAsked = nextLoop(reviewing, { type: "needInput", question: "这条验收标准指哪段？" }, cfg);
@@ -120,7 +136,8 @@ describe("cursor-dev-loop", () => {
     let state = reachReview(initialLoopState(1));
     for (let i = 0; i < 4; i++) {
       state = nextLoop(state, { type: "review", pass: false }, cfg).state;
-      if (state.phase === "develop") {
+      if (state.phase === "plan") {
+        state = nextLoop(state, { type: "stepOk" }, cfg).state;
         state = nextLoop(state, { type: "stepOk" }, cfg).state;
       }
     }
@@ -133,29 +150,46 @@ describe("cursor-dev-loop", () => {
     expect(forced.state.phase).toBe("done");
   });
 
-  it("旧的架构审核和 QA 状态能接着跑", () => {
+  it("旧的架构审核和 QA 状态能接着跑，停在开发的卡不退回 Plan", () => {
     const review = normalizeLoopState({ phase: "arch", archRejects: 2, cardCount: 3, index: 1, techErrors: 0 });
     expect(review).toMatchObject({ phase: "review", reviewRejects: 2, cardCount: 3, index: 1 });
     const devops = normalizeLoopState({ phase: "qa", waitingFrom: "qa", archRejects: 1 });
     expect(devops.phase).toBe("devops");
     expect(devops.waitingFrom).toBe("review");
-    expect(devops.reviewRejects).toBe(1);
+    const developing = normalizeLoopState({ phase: "develop", reviewRejects: 1 });
+    expect(developing.phase).toBe("develop");
     const passed = nextLoop({ ...devops, phase: "devops", waitingFrom: undefined }, { type: "devops", results: [true] }, cfg);
     expect(passed.state.phase).toBe("done");
   });
 });
 
-function passRest(state: DevLoopState, _card: number): DevLoopState {
-  let current = state.phase === "develop" ? nextLoop(state, { type: "stepOk" }, cfg).state : state;
-  current = nextLoop(current, { type: "review", pass: true }, cfg).state;
-  return nextLoop(current, { type: "devops", results: [true] }, cfg).state;
-}
+describe("cursor-qa", () => {
+  it("通过就结束，失败后可以重试", () => {
+    const started = nextQa(initialQaState(), { type: "start" });
+    expect(started.action).toMatchObject({ kind: "runStep", nodeId: "qa" });
+    const failed = nextQa(started.state, { type: "qa", pass: false });
+    expect(failed.action).toMatchObject({ kind: "waitInput", waitKind: "qaFailed", fromStep: "qa", options: ["answer", "abort"] });
+    const retried = nextQa(failed.state, { type: "answer", text: "再跑一次" });
+    expect(retried.action).toMatchObject({ kind: "runStep", nodeId: "qa" });
+    const done = nextQa(retried.state, { type: "qa", pass: true });
+    expect(done.state.phase).toBe("done");
+    expect(done.action.kind).toBe("cardDelivered");
+  });
 
-function reachReview(state: DevLoopState): DevLoopState {
-  let current = nextLoop(state, { type: "start" }, cfg).state;
-  return nextLoop(current, { type: "stepOk" }, cfg).state;
+  it("旧状态缺字段时仍停在 QA", () => {
+    expect(normalizeQaState({}).phase).toBe("qa");
+  });
+});
+
+function reachReview(state: DevLoopState, config: LoopConfig = cfg): DevLoopState {
+  let current = state.phase === "plan" ? state : nextLoop(state, { type: "start" }, config).state;
+  if (current.phase === "plan") current = nextLoop(current, { type: "stepOk" }, config).state;
+  if (current.phase === "develop") current = nextLoop(current, { type: "stepOk" }, config).state;
+  return current;
 }
 
 function reachDevops(state: DevLoopState): DevLoopState {
   return nextLoop(reachReview(state), { type: "review", pass: true }, cfg).state;
 }
+
+void drive;

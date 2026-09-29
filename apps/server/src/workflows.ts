@@ -7,6 +7,7 @@ import type { Dispatcher, RequirementRow, StepRunRow, WaitInfo } from "./workflo
 import { stepLogFile } from "./workflows/_framework/dispatcher.js";
 import { appendRequirements, splitLogFile, type SplitRunner, type SplitTaskRow } from "./workflows/_framework/split-task.js";
 import { normalizeLoopState, normalizeStepId, type DevLoopState, type InputAction } from "./workflows/cursor-dev-loop/next.js";
+import { normalizeQaState } from "./workflows/cursor-qa/next.js";
 
 const inputActions: InputAction[] = ["answer", "continue", "forcePass", "abort"];
 const historyPageSize = 20;
@@ -84,11 +85,13 @@ export function registerWorkflows(
     const workspace = db.prepare("SELECT archived FROM workspaces WHERE id = ?").get(id) as { archived: number } | undefined;
     if (!workspace) return reply.code(404).send({ error: "not_found", message: "workspace 不存在" });
     if (workspace.archived) return reply.code(409).send({ error: "archived", message: "已归档的 workspace 不能新增需求" });
+    const body = request.body as { workflow?: string };
+    const workflowId = body?.workflow === "cursor-qa" ? "cursor-qa" : "cursor-dev-loop";
     const parsed = requirementCardSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid", message: "标题、目标、背景和至少一条验收标准都必填" });
     }
-    const [created] = transaction(db, () => appendRequirements(db, id, null, [parsed.data]));
+    const [created] = transaction(db, () => appendRequirements(db, id, null, [parsed.data], Date.now(), workflowId));
     return reply.code(201).send(requirementDto(db, loadRequirement(db, created!)!, true));
   });
 
@@ -183,7 +186,9 @@ export function registerWorkflows(
 }
 
 function requirementDto(db: DatabaseSync, row: RequirementRow, withSteps: boolean) {
-  const state: DevLoopState | null = row.state_json ? normalizeLoopState(JSON.parse(row.state_json)) : null;
+  const parsed = row.state_json ? JSON.parse(row.state_json) : null;
+  const state: DevLoopState | null = row.workflow_id === "cursor-qa" ? null : parsed ? normalizeLoopState(parsed) : null;
+  const qaPhase = row.workflow_id === "cursor-qa" && parsed ? normalizeQaState(parsed).phase : null;
   const steps = withSteps
     ? (db
         .prepare("SELECT * FROM step_runs WHERE requirement_id = ? ORDER BY started_at, rowid")
@@ -195,10 +200,11 @@ function requirementDto(db: DatabaseSync, row: RequirementRow, withSteps: boolea
     featureId: row.feature_id,
     seq: row.seq,
     card: JSON.parse(row.card_json) as RequirementCard,
+    workflowId: row.workflow_id === "cursor-qa" ? "cursor-qa" : "cursor-dev-loop",
     status: row.status,
-    phase: state?.phase ?? null,
+    phase: qaPhase ?? state?.phase ?? null,
     reviewRejects: state?.reviewRejects ?? 0,
-    wait: row.wait_json ? normalizeWait(JSON.parse(row.wait_json) as WaitInfo) : null,
+    wait: row.wait_json ? normalizeWait(JSON.parse(row.wait_json) as WaitInfo, row.workflow_id) : null,
     hasAgent: Boolean(row.agent_id),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -217,7 +223,8 @@ function requirementDto(db: DatabaseSync, row: RequirementRow, withSteps: boolea
   };
 }
 
-function normalizeWait(wait: WaitInfo): WaitInfo {
+function normalizeWait(wait: WaitInfo, workflowId: string): WaitInfo {
+  if (workflowId === "cursor-qa") return { ...wait, fromStep: "qa" };
   const from = String(wait.fromStep);
   return { ...wait, fromStep: from === "qa" ? "review" : normalizeStepId(from) };
 }

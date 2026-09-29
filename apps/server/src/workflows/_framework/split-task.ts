@@ -245,17 +245,18 @@ export function appendRequirements(
   featureId: string | null,
   cards: RequirementCard[],
   now = Date.now(),
+  workflowId = "cursor-dev-loop",
 ): string[] {
   const max = db.prepare("SELECT COALESCE(MAX(seq), 0) AS n FROM requirements WHERE workspace_id = ?").get(workspaceId) as {
     n: number;
   };
   const insert = db.prepare(
-    `INSERT INTO requirements (id, workspace_id, feature_id, seq, card_json, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    `INSERT INTO requirements (id, workspace_id, feature_id, seq, card_json, status, workflow_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
   );
   return cards.map((card, index) => {
     const id = randomUUID();
-    insert.run(id, workspaceId, featureId, Number(max.n) + index + 1, JSON.stringify(card), now, now);
+    insert.run(id, workspaceId, featureId, Number(max.n) + index + 1, JSON.stringify(card), workflowId, now, now);
     return id;
   });
 }

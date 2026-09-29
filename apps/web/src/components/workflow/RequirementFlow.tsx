@@ -1,6 +1,6 @@
 import { Handle, Position, ReactFlow, type BuiltInEdge, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { rejectLimits, stepIds, stepLabels, type InputAction, type Requirement, type StepId, type WaitInfo } from "@/lib/api";
+import { rejectLimits, stepLabels, workflowSteps, type InputAction, type Requirement, type StepId, type WaitInfo } from "@/lib/api";
 import { WaitForm } from "./WaitForm";
 
 export type StepState = "idle" | "queued" | "running" | "passed" | "rejected" | "error" | "waiting";
@@ -86,8 +86,9 @@ export function RequirementFlow(props: {
   onInput?: (action: InputAction, text: string) => Promise<void>;
 }) {
   const { requirement } = props;
+  const steps = workflowSteps[requirement.workflowId] ?? workflowSteps["cursor-dev-loop"];
   let y = 0;
-  const nodes: StepFlowNode[] = stepIds.map((step) => {
+  const nodes: StepFlowNode[] = steps.map((step) => {
     const state = stepState(requirement, step);
     const node: StepFlowNode = {
       id: step,
@@ -106,22 +107,26 @@ export function RequirementFlow(props: {
     return node;
   });
   const overReview = requirement.reviewRejects > rejectLimits.review;
-  const edges: (Edge | BuiltInEdge)[] = [
-    { id: "d-r", source: "develop", target: "review", sourceHandle: "bottom", targetHandle: "top" },
-    { id: "r-o", source: "review", target: "devops", sourceHandle: "bottom", targetHandle: "top" },
-    {
-      id: "r-d",
-      type: "smoothstep",
-      pathOptions: { offset: 24, borderRadius: 8 },
-      source: "review",
-      target: "develop",
-      sourceHandle: "right-out",
-      targetHandle: "right-in",
-      label: `Review 打回 ${requirement.reviewRejects}/${rejectLimits.review}`,
-      style: { strokeDasharray: "4 4", stroke: overReview ? "#dc2626" : undefined },
-      labelStyle: { fill: overReview ? "#dc2626" : undefined },
-    },
-  ];
+  const edges: (Edge | BuiltInEdge)[] =
+    requirement.workflowId === "cursor-qa"
+      ? []
+      : [
+          { id: "p-d", source: "plan", target: "develop", sourceHandle: "bottom", targetHandle: "top" },
+          { id: "d-r", source: "develop", target: "review", sourceHandle: "bottom", targetHandle: "top" },
+          { id: "r-o", source: "review", target: "devops", sourceHandle: "bottom", targetHandle: "top" },
+          {
+            id: "r-p",
+            type: "smoothstep",
+            pathOptions: { offset: 88, borderRadius: 8 },
+            source: "review",
+            target: "plan",
+            sourceHandle: "right-out",
+            targetHandle: "right-in",
+            label: `Review 打回 ${requirement.reviewRejects}/${rejectLimits.review}`,
+            style: { strokeDasharray: "4 4", stroke: overReview ? "#dc2626" : undefined },
+            labelStyle: { fill: overReview ? "#dc2626" : undefined },
+          },
+        ];
 
   return (
     <div className="w-full" style={{ height: y + 24 }}>

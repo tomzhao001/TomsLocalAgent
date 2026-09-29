@@ -4,9 +4,9 @@ export type LoopConfig = {
 
 export const defaultLoopConfig: LoopConfig = { reviewRejectLimit: 3 };
 
-export type StepId = "develop" | "review" | "devops";
+export type StepId = "plan" | "develop" | "review" | "devops";
 
-export const stepIds: StepId[] = ["develop", "review", "devops"];
+export const stepIds: StepId[] = ["plan", "develop", "review", "devops"];
 
 export type DevLoopState = {
   cardCount: number;
@@ -29,7 +29,7 @@ export type LoopEvent =
   | { type: "forcePass" }
   | { type: "abort" };
 
-export type WaitKind = "question" | "limit" | "pushFailed" | "techError";
+export type WaitKind = "question" | "limit" | "pushFailed" | "techError" | "qaFailed";
 
 export type InputAction = "answer" | "continue" | "forcePass" | "abort";
 
@@ -45,11 +45,13 @@ const waitOptions: Record<WaitKind, InputAction[]> = {
   limit: ["continue", "forcePass", "abort"],
   pushFailed: ["answer", "forcePass", "abort"],
   techError: ["answer", "abort"],
+  qaFailed: ["answer", "abort"],
 };
 
-const phases = new Set<DevLoopState["phase"]>(["develop", "review", "devops", "waiting", "done", "aborted"]);
+const phases = new Set<DevLoopState["phase"]>(["plan", "develop", "review", "devops", "waiting", "done", "aborted"]);
 
 export function normalizeStepId(step: string): StepId {
+  if (step === "plan") return "plan";
   if (step === "arch" || step === "review") return "review";
   if (step === "qa" || step === "devops") return "devops";
   return "develop";
@@ -77,16 +79,17 @@ export function normalizeLoopState(raw: unknown): DevLoopState {
 }
 
 export function initialLoopState(cardCount: number): DevLoopState {
-  return { cardCount, index: 0, phase: "develop", reviewRejects: 0, techErrors: 0 };
+  return { cardCount, index: 0, phase: "plan", reviewRejects: 0, techErrors: 0 };
 }
 
 export function nextLoop(state: DevLoopState, event: LoopEvent, cfg: LoopConfig = defaultLoopConfig): { state: DevLoopState; action: LoopAction } {
   if (event.type === "abort") return { state: { ...state, phase: "aborted" }, action: { kind: "aborted" } };
   if (state.phase === "done" || state.phase === "aborted") return { state, action: { kind: state.phase === "done" ? "done" : "aborted" } };
-  if (event.type === "start") return run(state, "develop", "开始开发");
+  if (event.type === "start") return run(state, "plan", "先写计划");
   if (event.type === "techError") return onTechError(state);
   if (state.phase === "waiting") return onWait(state, event);
   if (event.type === "needInput") return wait(clearTech(state), state.phase, event.question, "question");
+  if (state.phase === "plan" && event.type === "stepOk") return run(clearTech(state, "develop"), "develop", "按计划开发");
   if (state.phase === "develop" && event.type === "stepOk") return run(clearTech(state, "review"), "review", "Review");
   if (state.phase === "review" && event.type === "review") return onReview(state, event.pass, cfg);
   if (state.phase === "devops" && event.type === "devops") return onDevops(state, event.results);
@@ -97,7 +100,7 @@ function onReview(state: DevLoopState, pass: boolean, cfg: LoopConfig): { state:
   if (pass) return run(clearTech({ ...state, phase: "devops" }), "devops", "DevOps 发布");
   const reviewRejects = state.reviewRejects + 1;
   const next = clearTech({ ...state, reviewRejects });
-  if (reviewRejects <= cfg.reviewRejectLimit) return run(next, "develop", "Review 打回，继续开发");
+  if (reviewRejects <= cfg.reviewRejectLimit) return run(next, "plan", "Review 打回，先改计划");
   return wait(next, "review", "Review 超过打回上限", "limit");
 }
 
@@ -113,19 +116,19 @@ function onDevops(state: DevLoopState, results: boolean[]): { state: DevLoopStat
   const advanced = clearTech({
     ...state,
     index: state.index + 1,
-    phase: "develop",
+    phase: "plan",
     reviewRejects: 0,
   });
   return {
     state: advanced,
-    action: { kind: "runStep", nodeId: "develop", cardIndex: advanced.index, prompt: `交付第 ${deliveredIndex + 1} 张后开发下一张` },
+    action: { kind: "runStep", nodeId: "plan", cardIndex: advanced.index, prompt: `交付第 ${deliveredIndex + 1} 张后为下一张写计划` },
   };
 }
 
 function onTechError(state: DevLoopState): { state: DevLoopState; action: LoopAction } {
   const techErrors = state.techErrors + 1;
   const current = state.phase === "waiting" ? state.waitingFrom ?? "develop" : state.phase;
-  const phase: StepId = current === "review" || current === "devops" ? current : "develop";
+  const phase: StepId = current === "plan" || current === "review" || current === "devops" ? current : "develop";
   if (techErrors >= 2) return wait({ ...state, techErrors, waitingFrom: phase }, phase, "同一步连续技术错误", "techError");
   return run({ ...state, techErrors }, phase, "技术错误后重试");
 }
@@ -135,7 +138,7 @@ function onWait(state: DevLoopState, event: LoopEvent): { state: DevLoopState; a
     const from = state.waitingFrom ?? "develop";
     return run({ ...state, phase: from, waitingFrom: undefined }, from, `用户回复：${event.text}`);
   }
-  if (event.type === "continue") return run({ ...state, phase: "develop", waitingFrom: undefined }, "develop", `人工继续：${event.text}`);
+  if (event.type === "continue") return run({ ...state, phase: "plan", waitingFrom: undefined }, "plan", `人工继续：${event.text}`);
   if (event.type === "forcePass") {
     if (state.waitingFrom === "review") return run({ ...state, phase: "devops", waitingFrom: undefined }, "devops", "强制通过 Review");
     return onDevops({ ...state, phase: "devops", waitingFrom: undefined }, []);

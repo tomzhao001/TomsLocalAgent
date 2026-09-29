@@ -46,7 +46,7 @@ describe("Dispatcher", () => {
     if (dir) await rm(dir, { recursive: true, force: true });
   });
 
-  async function setup(runtime: AgentRuntime, cards = 2, cfg?: { reviewRejectLimit: number }, reviewModel?: string) {
+  async function setup(runtime: AgentRuntime, cards = 2, cfg?: { reviewRejectLimit: number }, reviewModel?: string, workflowId = "cursor-dev-loop") {
     dir = await mkdtemp(join(tmpdir(), "gw-disp-"));
     db = openDatabase(join(dir, "gateway.db"));
     db.prepare(
@@ -57,6 +57,8 @@ describe("Dispatcher", () => {
       "ws",
       null,
       Array.from({ length: cards }, (_, index) => card(`卡 ${index + 1}`)),
+      Date.now(),
+      workflowId,
     );
     const locks = new WorkspaceLockManager(db);
     const dispatcher = make(runtime, locks, cfg, reviewModel);
@@ -84,12 +86,13 @@ describe("Dispatcher", () => {
     const { runtime, calls } = scripted();
     const { ids, locks, dispatcher } = await setup(runtime);
     await tick(dispatcher);
-    expect(calls.map((call) => call.access)).toEqual(["develop"]);
+    expect(calls.map((call) => call.access)).toEqual(["plan"]);
+    expect(calls[0]!.prompt).toContain("TDD");
     expect(row(ids[1]!).status).toBe("pending");
-    await tick(dispatcher, 3);
-    expect(row(ids[0]!).status).toBe("delivered");
-    expect(calls.map((call) => call.access)).toEqual(["develop", "review", "devops"]);
     await tick(dispatcher, 4);
+    expect(row(ids[0]!).status).toBe("delivered");
+    expect(calls.map((call) => call.access)).toEqual(["plan", "develop", "review", "devops"]);
+    await tick(dispatcher, 5);
     expect(row(ids[1]!).status).toBe("delivered");
     expect(locks.holder("ws", "workflow")).not.toBeNull();
     await tick(dispatcher);
@@ -100,7 +103,7 @@ describe("Dispatcher", () => {
     const { runtime, calls } = scripted();
     const { dispatcher, ids } = await setup(runtime);
     await tick(dispatcher, 10);
-    expect(calls.map((call) => call.agentId ?? null)).toEqual([null, null, "agent-1", null, null, "agent-3"]);
+    expect(calls.map((call) => call.agentId ?? null)).toEqual([null, "agent-1", null, "agent-1", null, "agent-3", null, "agent-3"]);
     expect(row(ids[0]!).agent_id).toBe("agent-1");
     expect(row(ids[1]!).agent_id).toBe("agent-3");
   });
@@ -116,20 +119,20 @@ describe("Dispatcher", () => {
       await pass(input);
     });
     const { dispatcher, ids } = await setup(runtime, 1);
-    await tick(dispatcher, 2);
+    await tick(dispatcher, 3);
     const waiting = row(ids[0]!);
     expect(waiting.status).toBe("waiting_input");
     expect(JSON.parse(waiting.wait_json!)).toMatchObject({ kind: "question", fromStep: "develop", message: "用哪个数据库？" });
     await tick(dispatcher);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(dispatcher.applyInput(ids[0]!, "answer", "SQLite")).toEqual({ ok: true });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     await tick(dispatcher);
-    expect(calls[1]).toMatchObject({ access: "develop", agentId: "agent-1" });
-    expect(calls[1]!.prompt).toContain("SQLite");
+    expect(calls[2]).toMatchObject({ access: "develop", agentId: "agent-1" });
+    expect(calls[2]!.prompt).toContain("SQLite");
   });
 
-  it("审核打回超过上限后等待输入，强制通过后进入 QA，打回意见带给开发", async () => {
+  it("审核打回超过上限后等待输入，强制通过后进入 DevOps，打回意见带给计划", async () => {
     const { runtime, calls } = scripted(async (input) => {
       if (input.access === "review") {
         await input.customTools?.submit_verdict?.execute({ verdict: "reject", comments: "拆分函数" });
@@ -138,9 +141,9 @@ describe("Dispatcher", () => {
       await pass(input);
     });
     const { dispatcher, ids } = await setup(runtime, 1, { reviewRejectLimit: 1 });
-    await tick(dispatcher, 5);
-    expect(calls[2]).toMatchObject({ access: "develop" });
-    expect(calls[2]!.prompt).toContain("拆分函数");
+    await tick(dispatcher, 7);
+    expect(calls[3]).toMatchObject({ access: "plan" });
+    expect(calls[3]!.prompt).toContain("拆分函数");
     const waiting = row(ids[0]!);
     expect(waiting.status).toBe("waiting_input");
     expect(JSON.parse(waiting.wait_json!)).toMatchObject({ kind: "limit", fromStep: "review", comments: "拆分函数" });
@@ -184,7 +187,7 @@ describe("Dispatcher", () => {
     await tick(restarted);
     const steps = db.prepare("SELECT status FROM step_runs ORDER BY started_at, rowid").all() as { status: string }[];
     expect(steps.map((step) => step.status)).toEqual(["interrupted", "finished"]);
-    expect(calls[0]).toMatchObject({ access: "develop", agentId: "agent-9" });
+    expect(calls[0]).toMatchObject({ access: "plan", agentId: "agent-9" });
     expect(row(ids[0]!).status).toBe("running");
   });
 
@@ -213,10 +216,12 @@ describe("Dispatcher", () => {
     await execFileAsync("git", ["init"], { cwd: dir, windowsHide: true });
     await mkdir(join(dir, "src"), { recursive: true });
     await writeFile(join(dir, "src", "hello.ts"), "export const hello = 'from-diff';\n");
-    await tick(dispatcher, 2);
-    expect(calls[1]).toMatchObject({ access: "review", model: "expensive", agentId: null });
-    expect(calls[1]!.prompt).toContain("能用");
-    expect(calls[1]!.prompt).toContain("from-diff");
+    await tick(dispatcher, 3);
+    expect(calls[0]).toMatchObject({ access: "plan" });
+    expect(calls[1]).toMatchObject({ access: "develop", agentId: "agent-1" });
+    expect(calls[2]).toMatchObject({ access: "review", model: "expensive", agentId: null });
+    expect(calls[2]!.prompt).toContain("能用");
+    expect(calls[2]!.prompt).toContain("from-diff");
     expect(row(ids[0]!).agent_id).toBe("agent-1");
   });
 
@@ -230,8 +235,30 @@ describe("Dispatcher", () => {
       await pass(input);
     });
     const { dispatcher } = await setup(runtime, 1);
-    await tick(dispatcher, 3);
-    expect(calls.map((call) => call.access)).toEqual(["develop", "review", "review"]);
+    await tick(dispatcher, 4);
+    expect(calls.map((call) => call.access)).toEqual(["plan", "develop", "review", "review"]);
+  });
+
+  it("QA 卡只跑 QA，失败后重试仍是 QA，通过后结束", async () => {
+    let passed = false;
+    const { runtime, calls } = scripted(async (input) => {
+      if (!passed) {
+        passed = true;
+        await input.customTools?.submit_verdict?.execute({ verdict: "reject", comments: "登录失败" });
+        return;
+      }
+      await pass(input);
+    });
+    const { dispatcher, ids } = await setup(runtime, 1, undefined, undefined, "cursor-qa");
+    await tick(dispatcher, 2);
+    expect(calls.map((call) => call.access)).toEqual(["qa"]);
+    expect(row(ids[0]!).status).toBe("waiting_input");
+    expect(JSON.parse(row(ids[0]!).wait_json!)).toMatchObject({ kind: "qaFailed", fromStep: "qa", comments: "登录失败" });
+    expect(dispatcher.applyInput(ids[0]!, "answer", "再跑")).toEqual({ ok: true });
+    await tick(dispatcher, 2);
+    expect(calls.map((call) => call.access)).toEqual(["qa", "qa"]);
+    expect(row(ids[0]!).status).toBe("delivered");
+    expect(calls.some((call) => call.access === "devops")).toBe(false);
   });
 
   it("没有提交结果算技术错误，连续两次进入等待输入", async () => {
@@ -239,6 +266,6 @@ describe("Dispatcher", () => {
     const { dispatcher, ids } = await setup(runtime, 1);
     await tick(dispatcher, 3);
     expect(calls).toHaveLength(2);
-    expect(JSON.parse(row(ids[0]!).wait_json!)).toMatchObject({ kind: "techError", fromStep: "develop" });
+    expect(JSON.parse(row(ids[0]!).wait_json!)).toMatchObject({ kind: "techError", fromStep: "plan" });
   });
 });

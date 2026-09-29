@@ -8,6 +8,7 @@ const waitTitles: Record<WaitInfo["kind"], string> = {
   limit: "打回次数超过上限",
   pushFailed: "推送失败",
   techError: "连续出现技术错误",
+  qaFailed: "E2E 未通过",
 };
 
 function actionLabel(action: InputAction, kind: WaitInfo["kind"]): string {

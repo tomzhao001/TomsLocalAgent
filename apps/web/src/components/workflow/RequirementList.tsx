@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { api, rejectLimits, stepLabels, type Feature, type InputAction, type Requirement, type StepId } from "@/lib/api";
+import { api, rejectLimits, stepLabels, workflowLabels, type Feature, type InputAction, type Requirement, type StepId } from "@/lib/api";
 import { RequirementFlow } from "./RequirementFlow";
 import { StepLogPanel } from "./StepLogPanel";
 
@@ -78,6 +78,7 @@ export function RequirementList(props: {
                 <AccordionTrigger>
                   <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                     <span className="truncate">{item.card.title}</span>
+                    <Badge variant="outline">{workflowLabels[item.workflowId] ?? "开发循环"}</Badge>
                     <Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge>
                     <RequirementMeta item={item} />
                   </span>

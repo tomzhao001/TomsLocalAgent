@@ -1,4 +1,4 @@
-export type AccessProfile = "chat" | "split" | "develop" | "review" | "devops";
+export type AccessProfile = "chat" | "split" | "plan" | "develop" | "review" | "qa" | "devops";
 
 export type CursorAccess = {
   mode: "agent" | "plan";
@@ -22,6 +22,11 @@ export const cursorAccess: Record<AccessProfile, CursorAccess> = {
     tools: [...readTools, "mcp"],
     rules: `${readonlyRules}拆卡结果只能通过 submit_requirements 工具提交，由 Gateway 写入数据库。`,
   },
+  plan: {
+    mode: "plan",
+    tools: [...readTools, "mcp"],
+    rules: "【纪律】你现在是 Plan，只写实现计划，禁止修改任何文件，禁止执行会改动仓库或系统状态的命令。",
+  },
   develop: {
     mode: "agent",
     rules: "",
@@ -30,6 +35,11 @@ export const cursorAccess: Record<AccessProfile, CursorAccess> = {
     mode: "agent",
     tools: [...readTools, "mcp"],
     rules: "【纪律】你现在是 Review，只读本次改动并对照验收标准给出判定，禁止修改任何文件，禁止搜索或通读整个代码仓库。",
+  },
+  qa: {
+    mode: "agent",
+    tools: [...readTools, "shell", "mcp"],
+    rules: "【纪律】你现在是 QA，只运行端到端测试和检查命令，禁止修改任何源代码或配置文件，禁止提交或推送。",
   },
   devops: {
     mode: "agent",

@@ -15,6 +15,7 @@ function requirement(patch: Partial<Requirement>): Requirement {
     featureId: null,
     seq: 1,
     card,
+    workflowId: "cursor-dev-loop",
     status: "running",
     phase: "develop",
     reviewRejects: 0,

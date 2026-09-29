@@ -37,6 +37,7 @@ export function RequirementDialog(props: {
           goal: String(data.get("goal") ?? "").trim(),
           context: String(data.get("context") ?? "").trim(),
           acceptanceCriteria: lines(String(data.get("criteria") ?? "")),
+          workflow: String(data.get("workflow") ?? "cursor-dev-loop"),
         },
       });
       form.reset();
@@ -55,8 +56,20 @@ export function RequirementDialog(props: {
         <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
           <DialogHeader>
             <DialogTitle>新增需求</DialogTitle>
-            <DialogDescription>这张卡会追加到队尾，轮到它时自动完成开发、审核、QA 和推送。</DialogDescription>
+            <DialogDescription>这张卡会追加到队尾。开发循环会先写计划再开发、审核和推送；QA 只跑端到端测试。</DialogDescription>
           </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="req-workflow">工作流</Label>
+            <select
+              id="req-workflow"
+              name="workflow"
+              defaultValue="cursor-dev-loop"
+              className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+            >
+              <option value="cursor-dev-loop">开发循环</option>
+              <option value="cursor-qa">QA（E2E）</option>
+            </select>
+          </div>
           <div className="grid gap-2">
             <Label htmlFor="req-title">标题</Label>
             <Input id="req-title" name="title" required />

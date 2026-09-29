@@ -147,13 +147,17 @@ describe("注入的 SDK", () => {
 
   it("工作流各步骤用各自的档位，拆卡和审核不能编辑", () => {
     expect(cursorAccess.develop.tools).toBeUndefined();
-    for (const profile of ["split", "review", "devops"] as const) {
+    for (const profile of ["split", "plan", "review", "qa", "devops"] as const) {
       expect(cursorAccess[profile].tools).toContain("mcp");
       expect(cursorAccess[profile].tools).not.toContain("edit");
       expect(cursorAccess[profile].tools).not.toContain("delete");
     }
+    expect(cursorAccess.plan.mode).toBe("plan");
+    expect(cursorAccess.develop.mode).toBe("agent");
     expect(cursorAccess.split.tools).not.toContain("shell");
+    expect(cursorAccess.plan.tools).not.toContain("shell");
     expect(cursorAccess.review.tools).not.toContain("shell");
+    expect(cursorAccess.qa.tools).toContain("shell");
     expect(cursorAccess.devops.tools).toContain("shell");
   });
 

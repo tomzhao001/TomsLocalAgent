@@ -23,6 +23,8 @@ import {
   type WaitKind,
 } from "../cursor-dev-loop/next.js";
 import { stepPrompt } from "../cursor-dev-loop/prompts.js";
+import { initialQaState, nextQa, normalizeQaState, toQaEvent, type QaAction, type QaState } from "../cursor-qa/next.js";
+import { qaPrompt } from "../cursor-qa/prompts.js";
 import { parseResultBlock, stepTools, toLoopEvent, type StepResult } from "./result.js";
 
 export type RequirementRow = {
@@ -31,6 +33,7 @@ export type RequirementRow = {
   feature_id: string | null;
   seq: number;
   card_json: string;
+  workflow_id: string;
   status: RequirementStatus;
   agent_id: string | null;
   state_json: string | null;
@@ -57,18 +60,26 @@ export type StepRunRow = {
 
 export type WaitInfo = {
   kind: WaitKind;
-  fromStep: StepId;
+  fromStep: StepId | "qa";
   message: string;
   comments?: string;
   options: InputAction[];
 };
 
-type RunStepAction = Extract<LoopAction, { kind: "runStep" }> & { comments?: string };
+type RunStepAction = {
+  kind: "runStep";
+  nodeId: StepId | "qa";
+  cardIndex: number;
+  prompt: string;
+  comments?: string;
+};
 
-const stepAccess: Record<StepId, AccessProfile> = {
+const stepAccess: Record<StepId | "qa", AccessProfile> = {
+  plan: "plan",
   develop: "develop",
   review: "review",
   devops: "devops",
+  qa: "qa",
 };
 
 export function stepLogFile(logDir: string, requirementId: string, stepRunId: string): string {
@@ -152,7 +163,7 @@ export class Dispatcher {
           : action === "forcePass"
             ? { type: "forcePass" }
             : { type: "abort" };
-    this.save(row, nextLoop(this.state(row), event, this.cfg));
+    this.save(row, this.transition(row, event));
     return { ok: true };
   }
 
@@ -168,7 +179,7 @@ export class Dispatcher {
       }
       if (!this.options.runtime()) return;
       if (!this.options.locks.tryAcquire(workspaceId, "workflow", { type: "workflow", id: workspaceId }).ok) return;
-      this.save(next, nextLoop(initialLoopState(1), { type: "start" }, this.cfg));
+      this.save(next, this.begin(next));
       head = this.load(next.id)!;
     }
     if (head.status !== "running") return;
@@ -186,7 +197,13 @@ export class Dispatcher {
     }
     let comments: string | undefined;
     if (latest && latest.consumed === 0) {
-      if (String(latest.step) === "qa") {
+      const result = latest.result_json ? (JSON.parse(latest.result_json) as StepResult) : null;
+      if (result && result.verdict !== "need_input") comments = result.comments;
+      if (isQa(head)) {
+        const event = latest.status === "finished" ? toQaEvent(result) : ({ type: "techError" } as const);
+        this.db.prepare("UPDATE step_runs SET consumed = 1 WHERE id = ?").run(latest.id);
+        this.save(head, nextQa(this.qaState(head), event), comments);
+      } else if (String(latest.step) === "qa") {
         this.db.prepare("UPDATE step_runs SET consumed = 1 WHERE id = ?").run(latest.id);
         const current = this.state(head);
         this.save(head, {
@@ -194,9 +211,7 @@ export class Dispatcher {
           action: { kind: "runStep", nodeId: "devops", cardIndex: current.index, prompt: "进入 DevOps" },
         });
       } else {
-        const result = latest.result_json ? (JSON.parse(latest.result_json) as StepResult) : null;
         const event = latest.status === "finished" ? toLoopEvent(normalizeStepId(latest.step), result) : ({ type: "techError" } as const);
-        if (result && result.verdict !== "need_input") comments = result.comments;
         this.db.prepare("UPDATE step_runs SET consumed = 1 WHERE id = ?").run(latest.id);
         this.save(head, nextLoop(this.state(head), event, this.cfg), comments);
       }
@@ -204,10 +219,13 @@ export class Dispatcher {
       if (head.status !== "running") return;
     }
     const pending = head.pending_action_json ? (JSON.parse(head.pending_action_json) as RunStepAction) : null;
-    if (pending?.kind === "runStep") this.launch(head, { ...pending, nodeId: normalizeStepId(pending.nodeId) });
+    if (pending?.kind === "runStep") {
+      const nodeId = isQa(head) ? "qa" : normalizeStepId(pending.nodeId);
+      this.launch(head, { ...pending, nodeId });
+    }
   }
 
-  private launch(row: RequirementRow, action: RunStepAction): void {
+  private launch(row: RequirementRow, action: RunStepAction & { nodeId: StepId | "qa" }): void {
     const runtime = this.options.runtime();
     if (!runtime) return;
     const workspace = this.db.prepare("SELECT path, repos_json FROM workspaces WHERE id = ?").get(row.workspace_id) as
@@ -248,15 +266,25 @@ export class Dispatcher {
       let status: StepRunRow["status"] = "finished";
       try {
         const diff = action.nodeId === "review" ? await this.reviewDiff(workspace) : undefined;
-        const prompt = stepPrompt({
-          step: action.nodeId,
-          card,
-          sharedContext: feature?.shared_context ?? "",
-          note: action.prompt,
-          comments: action.comments,
-          firstTurn: action.nodeId === "review" || !row.agent_id,
-          diff,
-        });
+        const sharedContext = feature?.shared_context ?? "";
+        const prompt =
+          action.nodeId === "qa"
+            ? qaPrompt({
+                card,
+                sharedContext,
+                note: action.prompt,
+                comments: action.comments,
+                firstTurn: !row.agent_id,
+              })
+            : stepPrompt({
+                step: action.nodeId,
+                card,
+                sharedContext,
+                note: action.prompt,
+                comments: action.comments,
+                firstTurn: action.nodeId === "review" || action.nodeId === "plan" || !row.agent_id,
+                diff,
+              });
         const terminal = await runtime.startRun(
           {
             sessionId: `req:${row.id}`,
@@ -315,7 +343,23 @@ export class Dispatcher {
     }
   }
 
-  private save(row: RequirementRow, outcome: { state: DevLoopState; action: LoopAction }, comments?: string): void {
+  private begin(row: RequirementRow): { state: DevLoopState | QaState; action: LoopAction | QaAction } {
+    if (isQa(row)) return nextQa(initialQaState(), { type: "start" });
+    return nextLoop(initialLoopState(1), { type: "start" }, this.cfg);
+  }
+
+  private transition(row: RequirementRow, event: LoopEvent): { state: DevLoopState | QaState; action: LoopAction | QaAction } {
+    if (!isQa(row)) return nextLoop(this.state(row), event, this.cfg);
+    if (event.type === "answer") return nextQa(this.qaState(row), event);
+    if (event.type === "abort") return nextQa(this.qaState(row), event);
+    return nextQa(this.qaState(row), { type: "answer", text: event.type === "continue" ? event.text : "" });
+  }
+
+  private qaState(row: RequirementRow): QaState {
+    return row.state_json ? normalizeQaState(JSON.parse(row.state_json)) : initialQaState();
+  }
+
+  private save(row: RequirementRow, outcome: { state: DevLoopState | QaState; action: LoopAction | QaAction }, comments?: string): void {
     const now = Date.now();
     const { state, action } = outcome;
     let status: RequirementStatus = "running";
@@ -365,7 +409,7 @@ export class Dispatcher {
     return row.state_json ? normalizeLoopState(JSON.parse(row.state_json)) : initialLoopState(1);
   }
 
-  private modelFor(step: StepId): string {
+  private modelFor(step: StepId | "qa"): string {
     if (step === "review" && this.options.reviewModel) return this.options.reviewModel;
     return this.options.model;
   }
@@ -377,6 +421,10 @@ export class Dispatcher {
       return `## 本次改动\n\n收集 diff 失败：${(error as Error).message}`;
     }
   }
+}
+
+function isQa(row: { workflow_id?: string }): boolean {
+  return row.workflow_id === "cursor-qa";
 }
 
 function workspaceRepos(path: string, reposJson: string): string[] {

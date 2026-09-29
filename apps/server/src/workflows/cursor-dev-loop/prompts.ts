@@ -5,10 +5,13 @@ const resultRule = `完成后必须调用 submit_verdict 工具提交结果；�
 如果工具不可用，就在回复最后单独输出一行：<gateway-result>{"verdict":"pass|reject|need_input","comments":"...","question":"..."}</gateway-result>`;
 
 const stepGuide: Record<StepId, string> = {
-  develop: `你是开发。必须按 TDD 完成这张卡，只做这张卡范围内的改动，不要提交或推送代码。
-1. 先按验收标准写会失败的测试，运行并确认失败。
-2. 再修改实现，直到这些测试通过。
-3. 测试通过才算本步通过。用 submit_verdict 提交 pass，comments 写测试命令和通过结果。`,
+  plan: `你是计划。根据需求卡和已有意见写出实现计划，不要修改任何文件。
+计划必须按 TDD 排列：
+1. 先写哪些会失败的测试，以及如何运行并确认失败。
+2. 再改哪些文件，直到这些测试通过。
+完成后用 submit_verdict 提交 pass，comments 写完整计划。`,
+  develop: `你是开发。严格按照上一步的计划执行，只做这张卡范围内的改动，不要提交或推送代码。
+计划做完并且测试通过后，用 submit_verdict 提交 pass，comments 写测试命令和结果。`,
   review: `你是 Review。只审查本次代码改动和其中涉及的文件，不要搜索或通读整个代码仓库。
 对照需求卡的验收标准逐条判断是否满足，并检查改动里的代码漏洞。
 有任何代码漏洞，或任何一条验收标准不符合，都提交 reject。comments 必须逐条写明漏洞或不符的验收项，以及具体修改建议。没有修改建议的 reject 无效。
@@ -28,7 +31,7 @@ export function stepPrompt(input: {
   diff?: string;
 }): string {
   const parts: string[] = [`## 当前步骤：${input.step}`, stepGuide[input.step]];
-  if (input.firstTurn || input.step === "review") {
+  if (input.firstTurn || input.step === "review" || input.step === "plan") {
     parts.push(cardText(input.card, input.sharedContext));
   } else {
     parts.push(`需求卡：${input.card.title}（完整内容见本对话开头）`);
