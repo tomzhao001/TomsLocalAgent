@@ -68,9 +68,15 @@ function LogLine({ event }: { event: LogEvent }) {
       </details>
     );
   }
-  if (event.type === "tool-start") return <p className="font-mono text-muted-foreground">→ {event.name}</p>;
-  if (event.type === "tool-end") return <p className="font-mono text-muted-foreground">✓ {event.name}</p>;
+  if (event.type === "tool-start") return <p className="font-mono text-muted-foreground">→ {toolLine(event.name, event.detail)}</p>;
+  if (event.type === "tool-end") return <p className="font-mono text-muted-foreground">✓ {toolLine(event.name, event.detail)}</p>;
+  if (event.type === "plan") return <p className="text-muted-foreground">计划：{event.plan.name || event.plan.overview || "已生成"}</p>;
+  if (event.type === "todos") return <p className="text-muted-foreground">待办 {event.todos.length} 项</p>;
   if (event.type === "error") return <p className="text-destructive">{event.message}</p>;
   if (event.type === "done") return <p className="text-muted-foreground">结束：{event.status}</p>;
   return null;
+}
+
+function toolLine(name: string, detail?: string): string {
+  return detail ? `${name} ${detail}` : name;
 }

@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { buildApp } from "./app.js";
 import { applyEnvFile, loadConfig } from "./config.js";
+import { openCursorAcp, routeCursorRuntime } from "./providers/acp.js";
 import { loadCursorRuntime, loadOpenCodeRuntime, type OpenCodeHandle } from "./providers/live.js";
 import type { AgentRuntime } from "./runs.js";
 
@@ -10,9 +11,12 @@ mkdirSync(config.logDir, { recursive: true });
 
 const runtimes: Partial<Record<string, AgentRuntime>> = {};
 let opencode: OpenCodeHandle | null = null;
+let cursorAcp: { runtime: AgentRuntime; close: () => void } | null = null;
 
 if (!config.fakeRuntime && config.cursorApiKey) {
-  runtimes.cursor = await loadCursorRuntime(config.cursorApiKey);
+  const sdk = await loadCursorRuntime(config.cursorApiKey);
+  cursorAcp = await openCursorAcp({ bin: process.env.CURSOR_AGENT_BIN || "agent", apiKey: config.cursorApiKey });
+  runtimes.cursor = routeCursorRuntime(sdk, cursorAcp?.runtime ?? null);
 }
 if (!config.fakeRuntime && config.opencode.enabled) {
   if (config.opencode.password) process.env.OPENCODE_SERVER_PASSWORD = config.opencode.password;
@@ -20,6 +24,7 @@ if (!config.fakeRuntime && config.opencode.enabled) {
     opencode = await loadOpenCodeRuntime({ port: config.opencode.port, password: config.opencode.password });
   } catch (error) {
     console.error(`OpenCode 服务启动失败（端口 ${config.opencode.port}）：${(error as Error).message}`);
+    cursorAcp?.close();
     process.exit(1);
   }
   runtimes.opencode = opencode.runtime;
@@ -45,6 +50,7 @@ async function shutdown(signal: string) {
   closing = true;
   console.log(`收到 ${signal}，正在退出`);
   opencode?.close();
+  cursorAcp?.close();
   await app.close();
   process.exit(0);
 }
@@ -57,6 +63,7 @@ try {
   if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
     console.error(`端口 ${config.port} 已被占用。请先运行 status 查看，或运行 stop 停掉旧进程。`);
     opencode?.close();
+    cursorAcp?.close();
     process.exit(1);
   }
   throw error;

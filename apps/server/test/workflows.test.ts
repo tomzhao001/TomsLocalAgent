@@ -54,6 +54,15 @@ describe("工作流接口", () => {
     }
   }
 
+  async function waitRun(runId: string) {
+    for (let i = 0; i < 20; i++) {
+      const log = await authed("GET", `/api/runs/${runId}/log?offset=0`);
+      if (log.json().status !== "running") return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("run timeout");
+  }
+
   async function waitSplit(id: string, status: string) {
     await app.splits!.idle();
     const row = app.splits!.load(id);
@@ -154,6 +163,33 @@ describe("工作流接口", () => {
     expect(active.items.map((item: { card: { title: string } }) => item.card.title)).toEqual(["已有的卡", "登录表单", "登录接口"]);
     expect(active.features).toEqual([expect.objectContaining({ title: "登录", total: 2, delivered: 0 })]);
     expect((await authed("POST", `/api/splits/${split.id}/confirm`, { sharedContext: "x", cards: [card("再来")] })).statusCode).toBe(409);
+  });
+
+  it("拆卡 prompt 带上聊天里保存的计划正文", async () => {
+    const seen: { access?: string; prompt: string }[] = [];
+    const runtime: AgentRuntime = {
+      async startRun(input, emit) {
+        seen.push({ access: input.access, prompt: input.prompt });
+        if (input.access === "chat") {
+          emit({
+            type: "plan",
+            plan: { name: "登录", plan: "先改登录表单", todos: [{ id: "1", content: "改表单", status: "pending" }] },
+          });
+        } else {
+          await input.customTools?.submit_requirements?.execute({ sharedContext: "背景", cards: [card("好卡")] });
+        }
+        emit({ type: "done", status: "finished" });
+        return "finished";
+      },
+    };
+    const ws = await start({ cursor: runtime });
+    const chat = await authed("POST", "/api/sessions", { provider: "cursor", workspaceId: ws });
+    const sent = await authed("POST", `/api/sessions/${chat.json().id}/messages`, { prompt: "做个计划", model: "m", mode: "plan" });
+    await waitRun(sent.json().runId);
+    const started = await authed("POST", `/api/workspaces/${ws}/splits`, { prompt: "拆一下", chatSessionId: chat.json().id });
+    await waitSplit(started.json().id, "draft");
+    expect(seen[1]?.prompt).toContain("先改登录表单");
+    expect(seen[1]?.prompt).toContain("拆一下");
   });
 
   it("拆卡用独立的只读 agent，校验失败的结果会返回给模型", async () => {

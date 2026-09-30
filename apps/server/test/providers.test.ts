@@ -24,6 +24,9 @@ describe("SDK 事件映射", () => {
     expect(mapCursorEvent({ type: "tool_call", status: "running", call_id: "c1", name: "read" })).toEqual([
       { type: "tool-start", callId: "c1", name: "read" },
     ]);
+    expect(mapCursorEvent({ type: "tool_call", status: "running", call_id: "c2", name: "read", args: { path: "src/a.ts" } })).toEqual([
+      { type: "tool-start", callId: "c2", name: "read", detail: "src/a.ts" },
+    ]);
     expect(mapCursorEvent({ type: "usage", usage: { totalTokens: 3 } })).toEqual([
       { type: "usage", usage: { totalTokens: 3 } },
     ]);

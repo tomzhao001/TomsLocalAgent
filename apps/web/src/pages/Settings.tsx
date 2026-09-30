@@ -18,6 +18,7 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
+  const [browsing, setBrowsing] = useState(false);
 
   async function load() {
     const res = await fetch("/api/workspaces", { credentials: "include" });
@@ -33,6 +34,22 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   useEffect(() => {
     void load();
   }, []);
+
+  async function browse() {
+    setError("");
+    setBrowsing(true);
+    try {
+      const res = await fetch("/api/workspaces/browse", { method: "POST", credentials: "include" });
+      const body = (await res.json().catch(() => ({}))) as { path?: string | null; message?: string };
+      if (!res.ok) {
+        setError(body.message ?? "无法打开目录选择");
+        return;
+      }
+      if (body.path) setPath(body.path);
+    } finally {
+      setBrowsing(false);
+    }
+  }
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -112,7 +129,20 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="workspace-path">路径</Label>
-              <Input id="workspace-path" name="path" value={path} onChange={(e) => setPath(e.target.value)} required />
+              <div className="flex gap-2">
+                <Input
+                  id="workspace-path"
+                  name="path"
+                  className="min-w-0 flex-1"
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                  placeholder="本机任意已有目录"
+                  required
+                />
+                <Button type="button" variant="outline" disabled={browsing} onClick={() => void browse()}>
+                  {browsing ? "选择中" : "浏览"}
+                </Button>
+              </div>
             </div>
             <Button type="submit">添加</Button>
           </form>

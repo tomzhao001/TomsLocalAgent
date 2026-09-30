@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +26,7 @@ describe("workspace", () => {
     if (dir) await rm(dir, { recursive: true, force: true });
   });
 
-  async function start() {
+  async function start(extra?: { pickDirectory?: () => Promise<string | null> }) {
     dir = await mkdtemp(join(tmpdir(), "gw-ws-"));
     const root = join(dir, "root");
     await mkdir(root, { recursive: true });
@@ -34,6 +35,7 @@ describe("workspace", () => {
       adminPassword: password,
       cookieSecure: true,
       workspaceRoots: [root],
+      pickDirectory: extra?.pickDirectory,
     });
     const login = await app.inject({
       method: "POST",
@@ -53,13 +55,36 @@ describe("workspace", () => {
     });
   }
 
-  it("拒绝逃出允许根目录的路径", async () => {
+  it("允许添加任意已存在的目录", async () => {
     await start();
     const outside = join(dir, "outside");
     await mkdir(outside);
-    const res = await authed("POST", "/api/workspaces", { name: "越界", path: outside });
+    const res = await authed("POST", "/api/workspaces", { name: "任意", path: outside });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().path).toBe(realpathSync(outside));
+  });
+
+  it("拒绝不存在的路径", async () => {
+    await start();
+    const res = await authed("POST", "/api/workspaces", { name: "无", path: join(dir, "missing") });
     expect(res.statusCode).toBe(400);
-    expect(res.json().message).toMatch(/允许的根目录/);
+    expect(res.json().message).toMatch(/已存在的目录/);
+  });
+
+  it("浏览目录返回所选路径，取消时不填路径", async () => {
+    let chosenPath: string | null = null;
+    await start({ pickDirectory: async () => chosenPath });
+    const picked = join(dir, "picked");
+    await mkdir(picked);
+    chosenPath = picked;
+    const chosen = await authed("POST", "/api/workspaces/browse");
+    expect(chosen.statusCode).toBe(200);
+    expect(chosen.json().path).toBe(realpathSync(picked));
+
+    chosenPath = null;
+    const cancelled = await authed("POST", "/api/workspaces/browse");
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json()).toEqual({ path: null });
   });
 
   it("拒绝相互包含的路径", async () => {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { DatabaseSync } from "node:sqlite";
-import { normalizeWorkspacePath, pathsOverlap, scanGitRepos } from "./paths.js";
+import { normalizeWorkspacePath, pathsOverlap, pickDirectory, scanGitRepos } from "./paths.js";
 
 type WorkspaceRow = {
   id: string;
@@ -13,7 +13,11 @@ type WorkspaceRow = {
   updated_at: number;
 };
 
-export function registerWorkspaces(app: FastifyInstance, db: DatabaseSync, roots: string[]): void {
+export function registerWorkspaces(
+  app: FastifyInstance,
+  db: DatabaseSync,
+  options?: { pickDirectory?: () => Promise<string | null> },
+): void {
   app.get("/api/workspaces", async () => {
     return db
       .prepare("SELECT * FROM workspaces ORDER BY created_at")
@@ -26,7 +30,7 @@ export function registerWorkspaces(app: FastifyInstance, db: DatabaseSync, roots
     if (!body?.name?.trim() || !body.path?.trim()) {
       return reply.code(400).send({ error: "invalid", message: "名称和路径都必填" });
     }
-    const normalized = normalizeWorkspacePath(body.path, roots);
+    const normalized = normalizeWorkspacePath(body.path);
     if (!normalized.ok) return reply.code(400).send({ error: "invalid", message: normalized.message });
     const overlap = existingPaths(db).find((path) => pathsOverlap(path, normalized.path));
     if (overlap) return reply.code(409).send({ error: "overlap", message: "路径与已有 workspace 重叠" });
@@ -53,7 +57,7 @@ export function registerWorkspaces(app: FastifyInstance, db: DatabaseSync, roots
       if (referenceCount(db, id) > 0) {
         return reply.code(409).send({ error: "referenced", message: "已被引用，不能修改路径" });
       }
-      const normalized = normalizeWorkspacePath(body.path, roots);
+      const normalized = normalizeWorkspacePath(body.path);
       if (!normalized.ok) return reply.code(400).send({ error: "invalid", message: normalized.message });
       const overlap = existingPaths(db, id).find((item) => pathsOverlap(item, normalized.path));
       if (overlap) return reply.code(409).send({ error: "overlap", message: "路径与已有 workspace 重叠" });
@@ -97,6 +101,18 @@ export function registerWorkspaces(app: FastifyInstance, db: DatabaseSync, roots
     const repos = JSON.stringify(scanGitRepos(current.path));
     db.prepare("UPDATE workspaces SET repos_json = ?, updated_at = ? WHERE id = ?").run(repos, Date.now(), id);
     return load(db, id);
+  });
+
+  app.post("/api/workspaces/browse", async (_request, reply) => {
+    try {
+      const picked = await (options?.pickDirectory ?? pickDirectory)();
+      if (!picked) return { path: null };
+      const normalized = normalizeWorkspacePath(picked);
+      if (!normalized.ok) return reply.code(400).send({ error: "invalid", message: normalized.message });
+      return { path: normalized.path };
+    } catch (error) {
+      return reply.code(500).send({ error: "browse_failed", message: (error as Error).message });
+    }
   });
 
   app.post("/api/sessions", async (request, reply) => {

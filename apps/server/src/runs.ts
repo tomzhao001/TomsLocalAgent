@@ -7,6 +7,7 @@ import { appendLog, logFile, readLog } from "./logs.js";
 import type { WorkspaceLockManager } from "./locks.js";
 import type { AccessProfile } from "./providers/access.js";
 import { readonlyViolation, watchReadonly } from "./providers/guard.js";
+import { recordPlan } from "./providers/plan-doc.js";
 
 export type GatewayToolResult = string | { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -24,6 +25,7 @@ export type RunContext = {
   model: string;
   cwd: string;
   access?: AccessProfile;
+  chatMode?: "ask" | "plan";
   agentId?: string | null;
   onAgent?: (agentId: string) => void;
   customTools?: Record<string, GatewayTool>;
@@ -84,7 +86,7 @@ export function registerRuns(
     if (!session) return reply.code(404).send({ error: "not_found", message: "聊天不存在" });
     const runtime = options.runtimes?.[session.provider] ?? options.runtime;
     if (!runtime) return reply.code(501).send({ error: "no_runtime", message: "当前没有可用的 agent" });
-    const body = request.body as { prompt?: string; model?: string };
+    const body = request.body as { prompt?: string; model?: string; mode?: string };
     if (!body.prompt?.trim()) return reply.code(400).send({ error: "invalid", message: "prompt 必填" });
 
     const workspace = db.prepare("SELECT path, repos_json FROM workspaces WHERE id = ?").get(session.workspace_id) as {
@@ -113,6 +115,7 @@ export function registerRuns(
       model,
       cwd: workspace.path,
       access: "chat",
+      chatMode: body.mode === "plan" ? "plan" : "ask",
       agentId: session.agent_id,
       onAgent: (agentId) => {
         if (dbOpen(db)) db.prepare("UPDATE chat_sessions SET agent_id = ? WHERE id = ?").run(agentId, session.id);
@@ -124,7 +127,14 @@ export function registerRuns(
     void (async () => {
       const changed = await watchReadonly(repos);
       try {
-        const status = await runtime.startRun(ctx, (event) => appendLog(file, event), controller.signal);
+        const status = await runtime.startRun(
+          ctx,
+          (event) => {
+            appendLog(file, event);
+            if (dbOpen(db)) recordPlan(db, runId, event);
+          },
+          controller.signal,
+        );
         if (await changed()) appendLog(file, { type: "error", message: readonlyViolation });
         if (dbOpen(db)) db.prepare("UPDATE runs SET status = ? WHERE id = ?").run(status ?? "finished", runId);
       } catch {

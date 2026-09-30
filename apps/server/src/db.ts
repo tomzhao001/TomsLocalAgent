@@ -113,7 +113,9 @@ export function openDatabase(path: string): DatabaseSync {
   ensureColumn(db, "runs", "session_id", "TEXT");
   ensureColumn(db, "runs", "model", "TEXT");
   ensureColumn(db, "runs", "prompt", "TEXT");
+  ensureColumn(db, "runs", "plan_json", "TEXT");
   ensureColumn(db, "chat_sessions", "agent_id", "TEXT");
+  ensureColumn(db, "step_runs", "trace_json", "TEXT");
   ensureColumn(db, "requirements", "workflow_id", "TEXT NOT NULL DEFAULT 'cursor-dev-loop'");
   return db;
 }

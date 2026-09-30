@@ -31,6 +31,7 @@ export type AppOptions = {
   dispatchIntervalMs?: number;
   workflowModel?: string;
   reviewModel?: string;
+  pickDirectory?: () => Promise<string | null>;
 };
 
 export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
@@ -67,7 +68,7 @@ export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
       adminPassword: options.adminPassword,
       cookieSecure: options.cookieSecure !== false,
     });
-    await registerWorkspaces(app, db, options.workspaceRoots ?? []);
+    await registerWorkspaces(app, db, { pickDirectory: options.pickDirectory });
     registerRuns(app, db, { logDir, locks, runtime, runtimes: options.runtimes });
     registerWorkflows(app, db, { logDir, dispatcher, splits });
     dispatcher.start();

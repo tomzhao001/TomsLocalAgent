@@ -5,6 +5,7 @@ import { dbOpen } from "../../db.js";
 import { appendLog } from "../../logs.js";
 import type { WorkspaceLockManager } from "../../locks.js";
 import type { AccessProfile } from "../../providers/access.js";
+import { traceFromEvent, type StepTrace } from "../../providers/map.js";
 import type { AgentRuntime } from "../../runs.js";
 import { scanGitRepos } from "../../paths.js";
 import { collectReviewDiff } from "../cursor-dev-loop/diff.js";
@@ -259,6 +260,7 @@ export class Dispatcher {
 
     const file = stepLogFile(this.options.logDir, row.id, stepRunId);
     const texts: string[] = [];
+    const trace: StepTrace[] = [];
     let recorded: StepResult | null = null;
     const controller = new AbortController();
     const keepAgent = action.nodeId !== "review";
@@ -305,6 +307,8 @@ export class Dispatcher {
           },
           (event) => {
             if (event.type === "text") texts.push(event.text);
+            const step = traceFromEvent(event);
+            if (step) trace.push(step);
             appendLog(file, event);
           },
           controller.signal,
@@ -319,9 +323,9 @@ export class Dispatcher {
           const result = recorded ?? parseResultBlock(texts);
           this.db
             .prepare(
-              "UPDATE step_runs SET status = ?, result_json = ?, ended_at = ? WHERE id = ? AND status = 'running'",
+              "UPDATE step_runs SET status = ?, result_json = ?, trace_json = ?, ended_at = ? WHERE id = ? AND status = 'running'",
             )
-            .run(status, result ? JSON.stringify(result) : null, Date.now(), stepRunId);
+            .run(status, result ? JSON.stringify(result) : null, trace.length ? JSON.stringify(trace) : null, Date.now(), stepRunId);
           this.db
             .prepare("UPDATE requirements SET version = version + 1, updated_at = ? WHERE id = ?")
             .run(Date.now(), row.id);

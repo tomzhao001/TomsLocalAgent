@@ -82,6 +82,28 @@ describe("Dispatcher", () => {
     return db.prepare("SELECT * FROM requirements WHERE id = ?").get(id) as RequirementRow;
   }
 
+  it("步骤结束时把工具轨迹写入 trace_json，判定仍在 result_json", async () => {
+    const runtime: AgentRuntime = {
+      async startRun(input, emit) {
+        emit({ type: "tool-start", callId: "c1", name: "read", detail: "src/a.ts" });
+        emit({ type: "tool-end", callId: "c1", name: "read", detail: "src/a.ts" });
+        await pass(input);
+        return "finished";
+      },
+    };
+    const { dispatcher, ids } = await setup(runtime, 1);
+    await tick(dispatcher);
+    const step = db.prepare("SELECT result_json, trace_json FROM step_runs WHERE requirement_id = ?").get(ids[0]!) as {
+      result_json: string;
+      trace_json: string;
+    };
+    expect(JSON.parse(step.result_json)).toMatchObject({ verdict: "pass" });
+    expect(JSON.parse(step.trace_json)).toEqual([
+      { callId: "c1", name: "read", status: "running", detail: "src/a.ts" },
+      { callId: "c1", name: "read", status: "completed", detail: "src/a.ts" },
+    ]);
+  });
+
   it("每次 tick 只推进一步，两张卡按顺序跑完后释放锁", async () => {
     const { runtime, calls } = scripted();
     const { ids, locks, dispatcher } = await setup(runtime);

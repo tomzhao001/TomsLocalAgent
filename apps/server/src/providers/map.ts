@@ -6,9 +6,44 @@ export type CursorStreamEvent = {
   call_id?: string;
   name?: string;
   status?: string;
+  args?: unknown;
   usage?: GatewayEvent extends { type: "usage"; usage: infer U } ? U : never;
   message?: { content?: { type: string; text?: string }[] };
 };
+
+const detailKeys = ["path", "file_path", "filePath", "target_file", "command", "cmd", "query"];
+
+export function toolDetail(args: unknown): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const record = args as Record<string, unknown>;
+  for (const key of detailKeys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return clipDetail(value);
+  }
+  return undefined;
+}
+
+function clipDetail(value: string): string {
+  const oneLine = value.replace(/\s+/g, " ").trim();
+  return oneLine.length > 160 ? `${oneLine.slice(0, 160)}…` : oneLine;
+}
+
+export type StepTrace = {
+  callId: string;
+  name: string;
+  status: "running" | "completed";
+  detail?: string;
+};
+
+export function traceFromEvent(event: GatewayEvent): StepTrace | null {
+  if (event.type !== "tool-start" && event.type !== "tool-end") return null;
+  return {
+    callId: event.callId,
+    name: event.name,
+    status: event.type === "tool-start" ? "running" : "completed",
+    ...(event.detail ? { detail: event.detail } : {}),
+  };
+}
 
 export function mapCursorEvent(event: CursorStreamEvent): GatewayEvent[] {
   if (event.type === "assistant") {
@@ -18,11 +53,13 @@ export function mapCursorEvent(event: CursorStreamEvent): GatewayEvent[] {
   }
   if (event.type === "thinking" && event.text) return [{ type: "thinking", text: event.text }];
   if (event.type === "tool_call" && event.call_id && event.name) {
+    const detail = toolDetail(event.args);
     return [
       {
         type: event.status === "running" ? "tool-start" : "tool-end",
         callId: event.call_id,
         name: event.name,
+        ...(detail ? { detail } : {}),
       },
     ];
   }

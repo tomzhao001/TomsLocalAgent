@@ -4,6 +4,7 @@ import type { RequirementCard } from "@gateway/shared";
 import { dbOpen, transaction } from "../../db.js";
 import { appendLog, logFile, readLog } from "../../logs.js";
 import { readonlyViolation, watchReadonly } from "../../providers/guard.js";
+import { latestPlanMarkdown } from "../../providers/plan-doc.js";
 import type { AgentRuntime, GatewayTool } from "../../runs.js";
 import { acceptRequirements } from "./split.js";
 
@@ -81,7 +82,13 @@ export class SplitRunner {
     const texts: string[] = [];
     const controller = new AbortController();
     const history = input.chatSessionId ? this.transcript(input.chatSessionId) : "";
-    const prompt = [splitTemplate, history ? `## 聊天记录（背景）\n${history}` : "", `## 用户的拆卡要求\n${input.prompt}`]
+    const plan = input.chatSessionId ? latestPlanMarkdown(this.db, input.chatSessionId) : "";
+    const prompt = [
+      splitTemplate,
+      history ? `## 聊天记录（背景）\n${history}` : "",
+      plan ? `## 已确认的计划\n${plan}` : "",
+      `## 用户的拆卡要求\n${input.prompt}`,
+    ]
       .filter(Boolean)
       .join("\n\n");
     const done = (async () => {

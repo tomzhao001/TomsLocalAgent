@@ -9,14 +9,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { SplitDialog } from "@/components/workflow/SplitDialog";
-import { readonlyViolation, type LogEvent } from "@/lib/api";
+import { readonlyViolation, type LogEvent, type PlanDocument, type PlanTodo } from "@/lib/api";
+import { appendLogEvent, todoLabel, type ChatBubble } from "./chat-log";
 
 type Session = { id: string; provider: string; workspace_id: string; workspace_name: string; title: string | null };
 type RunRow = { id: string; status: string; prompt: string | null };
 type ModelInfo = { id: string; label: string };
-type Bubble =
-  | { role: "user" | "assistant"; text: string }
-  | { role: "end"; runId: string; finished: boolean; violation: boolean };
+type Bubble = ChatBubble;
 
 const providerLabels: Record<string, string> = { cursor: "Cursor", opencode: "OpenCode" };
 
@@ -27,6 +26,7 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
   const [prompt, setPrompt] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [model, setModel] = useState("");
+  const [chatMode, setChatMode] = useState<"ask" | "plan">("ask");
   const [modelError, setModelError] = useState("");
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -81,16 +81,14 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
     const runs = await fetch(`/api/sessions/${id}/runs`, { credentials: "include" });
     if (!runs.ok || seq !== loadSeq.current) return;
     const rows = (await runs.json()) as RunRow[];
-    const next: Bubble[] = [];
+    let next: Bubble[] = [];
     for (const run of rows) {
       if (seq !== loadSeq.current) return;
       if (run.prompt) next.push({ role: "user", text: run.prompt });
       const log = await fetch(`/api/runs/${run.id}/log?offset=0`, { credentials: "include" });
       if (seq !== loadSeq.current) return;
       const body = (await log.json()) as { events: LogEvent[]; status: string };
-      for (const event of body.events) {
-        if (event.type === "text" && event.text) next.push({ role: "assistant", text: event.text });
-      }
+      next = body.events.reduce(appendLogEvent, next);
       if (body.status !== "running") next.push(roundEnd(run.id, body.status, body.events));
     }
     if (seq !== loadSeq.current) return;
@@ -144,7 +142,7 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt: text, model }),
+      body: JSON.stringify({ prompt: text, model, ...(activeProvider === "cursor" ? { mode: chatMode } : {}) }),
     });
     const body = (await res.json()) as { runId?: string; message?: string };
     if (seq !== loadSeq.current) return;
@@ -163,9 +161,8 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
       const payload = (await log.json()) as { events: LogEvent[]; nextOffset: number; status: string };
       if (payload.events.length) {
         events.push(...payload.events);
-        const texts = payload.events.flatMap((item) => (item.type === "text" && item.text ? [item.text] : []));
-        if (texts.length && seq === loadSeq.current) {
-          setBubbles((current) => [...current, ...texts.map((line) => ({ role: "assistant" as const, text: line }))]);
+        if (seq === loadSeq.current) {
+          setBubbles((current) => payload.events.reduce(appendLogEvent, current));
         }
         offset = payload.nextOffset;
       }
@@ -257,13 +254,17 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
                       </Button>
                     ) : null}
                   </div>
+                ) : bubble.role === "plan" ? (
+                  <PlanCard key={index} plan={bubble.plan} />
                 ) : (
                   <p
                     key={index}
                     className={
                       bubble.role === "user"
                         ? "ml-auto max-w-[80%] rounded-2xl bg-primary px-3 py-2 text-sm leading-6 whitespace-pre-wrap text-primary-foreground"
-                        : "mr-auto max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-sm leading-6 whitespace-pre-wrap"
+                        : bubble.role === "error"
+                          ? "mr-auto max-w-[80%] text-sm leading-6 whitespace-pre-wrap text-destructive"
+                          : "mr-auto max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-sm leading-6 whitespace-pre-wrap"
                     }
                   >
                     {bubble.text}
@@ -275,6 +276,17 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
           <form className="flex flex-col gap-2" onSubmit={(event) => void send(event)}>
             <Textarea name="prompt" value={prompt} placeholder="输入消息" onChange={(e) => setPrompt(e.target.value)} />
             <div className="flex items-center justify-end gap-2">
+              {activeProvider === "cursor" ? (
+                <Select value={chatMode} onValueChange={(value) => setChatMode(value === "plan" ? "plan" : "ask")}>
+                  <SelectTrigger className="w-28" aria-label="对话方式">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ask">提问</SelectItem>
+                    <SelectItem value="plan">出计划</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : null}
               <Select value={model} onValueChange={setModel} disabled={models.length === 0}>
                 <SelectTrigger className="w-48">
                   <SelectValue placeholder="暂无模型" />
@@ -314,6 +326,36 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
         />
       ) : null}
     </section>
+  );
+}
+
+function PlanCard({ plan }: { plan: PlanDocument }) {
+  return (
+    <div className="mr-auto flex w-full max-w-[80%] flex-col gap-2 rounded-2xl border px-3 py-2 text-sm leading-6">
+      <p className="font-medium">{plan.name || "计划"}</p>
+      {plan.overview ? <p className="text-muted-foreground">{plan.overview}</p> : null}
+      {plan.plan ? <p className="whitespace-pre-wrap">{plan.plan}</p> : null}
+      <TodoList todos={plan.todos} />
+      {plan.phases?.map((phase) => (
+        <div key={phase.name} className="flex flex-col gap-1">
+          <p className="font-medium">{phase.name}</p>
+          <TodoList todos={phase.todos} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TodoList({ todos }: { todos: PlanTodo[] }) {
+  if (todos.length === 0) return null;
+  return (
+    <ul className="flex flex-col gap-1">
+      {todos.map((todo) => (
+        <li key={todo.id}>
+          {todoLabel(todo.status)}：{todo.content}
+        </li>
+      ))}
+    </ul>
   );
 }
 
