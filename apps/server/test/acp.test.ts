@@ -143,6 +143,44 @@ describe("ACP 计划与权限", () => {
     expect(link.calls[1]?.params).toMatchObject({ modeId: "ask" });
   });
 
+  it("消息片段到达就发出，不等到回合结束", async () => {
+    const link = scripted((method, _params, peer) => {
+      if (method === "session/new") return session;
+      if (method === "session/prompt") {
+        peer.emit({
+          method: "session/update",
+          params: { sessionId: "sess-1", update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "想" } } },
+        });
+        peer.emit({
+          method: "session/update",
+          params: { sessionId: "sess-1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "你" } } },
+        });
+        peer.emit({
+          method: "session/update",
+          params: { sessionId: "sess-1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "好" } } },
+        });
+        return { stopReason: "end_turn" };
+      }
+      return {};
+    });
+    const runtime = createAcpRuntime(async () => link);
+    const result = await collect(runtime, {
+      sessionId: "s",
+      runId: "r",
+      workspaceId: "w",
+      prompt: "你好",
+      model: "auto",
+      cwd: "/",
+      access: "chat",
+      chatMode: "ask",
+    });
+    expect(result.events).toEqual([
+      { type: "thinking", text: "想" },
+      { type: "text", text: "你" },
+      { type: "text", text: "好" },
+    ]);
+  });
+
   it("没有模式声明时直接报错，不调用 set_mode", async () => {
     const link = scripted((method) => {
       if (method === "session/new") return { sessionId: "sess-2" };

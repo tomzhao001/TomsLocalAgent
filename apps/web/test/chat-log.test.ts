@@ -15,4 +15,21 @@ describe("聊天日志折叠", () => {
     expect(bubbles.map((item) => item.role)).toEqual(["assistant", "plan", "error"]);
     expect(bubbles[1]).toMatchObject({ role: "plan", plan: { plan: "1. 改表单", todos: [{ status: "completed" }] } });
   });
+
+  it("连续文本和思考各自合成一块，工具之后再开一段", () => {
+    const bubbles = [
+      { type: "text" as const, text: "你" },
+      { type: "text" as const, text: "好" },
+      { type: "thinking" as const, text: "想" },
+      { type: "thinking" as const, text: "一下" },
+      { type: "tool-start" as const, callId: "c1", name: "read", detail: "a.ts" },
+      { type: "tool-end" as const, callId: "c1", name: "read" },
+      { type: "text" as const, text: "看完" },
+    ].reduce(appendLogEvent, []);
+    expect(bubbles.map((item) => item.role)).toEqual(["assistant", "thinking", "tool", "assistant"]);
+    expect(bubbles[0]).toMatchObject({ text: "你好" });
+    expect(bubbles[1]).toMatchObject({ text: "想一下" });
+    expect(bubbles[2]).toMatchObject({ running: false, detail: "a.ts" });
+    expect(bubbles[3]).toMatchObject({ text: "看完" });
+  });
 });

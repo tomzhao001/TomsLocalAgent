@@ -6,7 +6,7 @@ import { openDatabase } from "./db.js";
 import { registerAuth } from "./auth.js";
 import { WorkspaceLockManager } from "./locks.js";
 import { registerWorkspaces } from "./workspaces.js";
-import { createFakeRuntime, registerRuns, type AgentRuntime } from "./runs.js";
+import { createFakeRuntime, recoverInterruptedRuns, registerRuns, type AgentRuntime } from "./runs.js";
 import { registerWorkflows } from "./workflows.js";
 import { Dispatcher } from "./workflows/_framework/dispatcher.js";
 import { SplitRunner } from "./workflows/_framework/split-task.js";
@@ -46,6 +46,7 @@ export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
     const workflowRuntime = () => options.runtimes?.cursor ?? runtime;
     const model = options.workflowModel ?? "auto";
     const locks = new WorkspaceLockManager(db);
+    recoverInterruptedRuns(db, logDir);
     locks.clearStale();
     const dispatcher = new Dispatcher({
       db,

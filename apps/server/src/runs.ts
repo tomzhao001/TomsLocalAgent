@@ -3,11 +3,14 @@ import type { FastifyInstance } from "fastify";
 import type { DatabaseSync } from "node:sqlite";
 import type { GatewayEvent } from "@gateway/shared";
 import { dbOpen } from "./db.js";
+import { eventCursor, formatSse, LiveRun, type LiveStatus } from "./live-run.js";
 import { appendLog, logFile, readLog } from "./logs.js";
 import type { WorkspaceLockManager } from "./locks.js";
 import type { AccessProfile } from "./providers/access.js";
 import { readonlyViolation, watchReadonly } from "./providers/guard.js";
 import { recordPlan } from "./providers/plan-doc.js";
+
+export const interruptedReply = "上次回答已中断";
 
 export type GatewayToolResult = string | { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -65,6 +68,18 @@ export function createFakeRuntime(): AgentRuntime {
   };
 }
 
+export function recoverInterruptedRuns(db: DatabaseSync, logDir: string): void {
+  const rows = db.prepare("SELECT id, session_id FROM runs WHERE status = 'running'").all() as {
+    id: string;
+    session_id: string | null;
+  }[];
+  const update = db.prepare("UPDATE runs SET status = 'error' WHERE id = ?");
+  for (const row of rows) {
+    if (row.session_id) appendLog(logFile(logDir, row.session_id, row.id), { type: "error", message: interruptedReply });
+    update.run(row.id);
+  }
+}
+
 export function registerRuns(
   app: FastifyInstance,
   db: DatabaseSync,
@@ -77,6 +92,7 @@ export function registerRuns(
 ): void {
   const locks = options.locks;
   const controllers = new Map<string, AbortController>();
+  const lives = new Map<string, LiveRun>();
 
   app.post("/api/sessions/:id/messages", async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -123,25 +139,38 @@ export function registerRuns(
     };
     const controller = new AbortController();
     controllers.set(runId, controller);
+    const live = new LiveRun();
+    lives.set(runId, live);
     const repos = JSON.parse(workspace.repos_json) as string[];
+    const publish = (event: GatewayEvent) => {
+      live.publish(event, () => {
+        appendLog(file, event);
+        if (dbOpen(db)) recordPlan(db, runId, event);
+      });
+    };
     void (async () => {
-      const changed = await watchReadonly(repos);
+      let terminal: LiveStatus = "error";
       try {
-        const status = await runtime.startRun(
-          ctx,
-          (event) => {
-            appendLog(file, event);
-            if (dbOpen(db)) recordPlan(db, runId, event);
-          },
-          controller.signal,
-        );
-        if (await changed()) appendLog(file, { type: "error", message: readonlyViolation });
-        if (dbOpen(db)) db.prepare("UPDATE runs SET status = ? WHERE id = ?").run(status ?? "finished", runId);
-      } catch {
-        if (!dbOpen(db)) return;
-        appendLog(file, { type: "error", message: "run failed" });
-        db.prepare("UPDATE runs SET status = 'error' WHERE id = ?").run(runId);
+        const changed = await watchReadonly(repos);
+        try {
+          const status = await runtime.startRun(ctx, publish, controller.signal);
+          if (await changed()) publish({ type: "error", message: readonlyViolation });
+          terminal = status ?? "finished";
+        } catch {
+          terminal = "error";
+          if (dbOpen(db)) publish({ type: "error", message: "run failed" });
+        }
+        if (dbOpen(db)) db.prepare("UPDATE runs SET status = ? WHERE id = ?").run(terminal, runId);
       } finally {
+        if (!live.frames.some((frame) => frame.event.type === "done")) {
+          try {
+            publish({ type: "done", status: terminal });
+          } catch {
+            // 归档失败也要结束订阅，避免连接一直挂着。
+          }
+        }
+        live.finish(terminal);
+        lives.delete(runId);
         controllers.delete(runId);
         if (dbOpen(db)) locks.release(session.workspace_id, "chat", runId);
       }
@@ -188,6 +217,36 @@ export function registerRuns(
       .all(id);
   });
 
+  app.get("/api/runs/:id/events", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const run = db.prepare("SELECT id, session_id, status FROM runs WHERE id = ?").get(id) as
+      | { id: string; session_id: string; status: string }
+      | undefined;
+    if (!run) return reply.code(404).send({ error: "not_found", message: "run 不存在" });
+    const after = eventCursor((request.query as { after?: string }).after, request.headers["last-event-id"]);
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    });
+    reply.raw.write(": connected\n\n");
+    const write = (seq: number, event: GatewayEvent) => {
+      if (!reply.raw.writableEnded) reply.raw.write(formatSse(seq, event));
+    };
+    const live = lives.get(run.id);
+    if (live) {
+      const stop = live.subscribe(after, (frame) => write(frame.id, frame.event), () => {
+        if (!reply.raw.writableEnded) reply.raw.end();
+      });
+      reply.raw.on("close", () => stop());
+      return;
+    }
+    replayArchive(options.logDir, run, after, write);
+    reply.raw.end();
+  });
+
   app.get("/api/runs/:id/log", async (request, reply) => {
     const { id } = request.params as { id: string };
     const run = db.prepare("SELECT id, session_id, status FROM runs WHERE id = ?").get(id) as
@@ -199,6 +258,25 @@ export function registerRuns(
     const { events, nextOffset } = readLog(file, Number.isFinite(offset) ? offset : 0);
     return { events, nextOffset, status: run.status };
   });
+}
+
+function replayArchive(
+  logDir: string,
+  run: { id: string; session_id: string; status: string },
+  after: number,
+  write: (seq: number, event: GatewayEvent) => void,
+): void {
+  const { events } = readLog(logFile(logDir, run.session_id, run.id), 0);
+  let last = 0;
+  let sawDone = false;
+  for (const event of events) {
+    last += 1;
+    if (last <= after) continue;
+    write(last, event);
+    if (event.type === "done") sawDone = true;
+  }
+  const status = run.status === "finished" || run.status === "cancelled" || run.status === "error" ? run.status : "error";
+  if (!sawDone && after < last + 1) write(last + 1, { type: "done", status });
 }
 
 function delay(ms: number): Promise<void> {

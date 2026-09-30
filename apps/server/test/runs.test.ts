@@ -1,3 +1,4 @@
+import { request as httpRequest } from "node:http";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { openDatabase } from "../src/db.js";
+import { readLog, logFile } from "../src/logs.js";
 import { WorkspaceLockManager } from "../src/locks.js";
+import { interruptedReply, type AgentRuntime } from "../src/runs.js";
 
 const password = "correct-horse";
 
@@ -88,6 +91,110 @@ describe("运行、日志与锁", () => {
       { type: "text", text: "你好" },
       { type: "done", status: "finished" },
     ]);
+  });
+
+  it("SSE 推出文本，结束后按序号补看归档", async () => {
+    const root = await start();
+    const { sessionId } = await session(root, "stream");
+    const sent = await authed("POST", `/api/sessions/${sessionId}/messages`, { prompt: "你好", model: "fake" });
+    const runId = sent.json().runId as string;
+    const live = await authed("GET", `/api/runs/${runId}/events`);
+    expect(live.statusCode).toBe(200);
+    expect(String(live.headers["content-type"])).toContain("text/event-stream");
+    expect(live.body).toContain('"text":"你好"');
+    const again = await authed("GET", `/api/runs/${runId}/events?after=1`);
+    expect(again.body).not.toContain("你好");
+    expect(again.body).toContain('"type":"done"');
+  });
+
+  it("断开 SSE 不会取消这次运行", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runtime: AgentRuntime = {
+      async startRun(_input, emit, signal) {
+        await gate;
+        if (signal?.aborted) return "cancelled";
+        emit({ type: "text", text: "还在" });
+        emit({ type: "done", status: "finished" });
+        return "finished";
+      },
+    };
+    dir = await mkdtemp(join(tmpdir(), "gw-run-"));
+    const root = join(dir, "root");
+    await mkdir(join(root, "one"), { recursive: true });
+    app = await buildApp({
+      dbPath: join(dir, "gateway.db"),
+      adminPassword: password,
+      cookieSecure: true,
+      workspaceRoots: [root],
+      logDir: join(dir, "logs"),
+      runtime,
+    });
+    const login = await app.inject({ method: "POST", url: "/api/login", payload: { password } });
+    cookie = cookieOf(login.headers["set-cookie"]);
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const address = app.server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const { sessionId } = await session(root, "detach");
+    const sent = await authed("POST", `/api/sessions/${sessionId}/messages`, { prompt: "先别停", model: "m" });
+    const runId = sent.json().runId as string;
+    await new Promise<void>((resolve, reject) => {
+      const req = httpRequest(
+        { hostname: "127.0.0.1", port, path: `/api/runs/${runId}/events`, headers: { cookie } },
+        (res) => {
+          res.once("data", () => {
+            req.destroy();
+            resolve();
+          });
+        },
+      );
+      req.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code === "ECONNRESET") resolve();
+        else reject(error);
+      });
+      req.end();
+    });
+    release();
+    const done = await waitFor(
+      async () => (await authed("GET", `/api/runs/${runId}/log?offset=0`)).json(),
+      (body) => body.status === "finished",
+    );
+    expect(done.events).toEqual([
+      { type: "text", text: "还在" },
+      { type: "done", status: "finished" },
+    ]);
+  });
+
+  it("重启后中断仍在跑的聊天，并放开锁", async () => {
+    const root = await start();
+    const { sessionId, workspaceId } = await session(root, "stuck");
+    await app.close();
+    const db = new DatabaseSync(join(dir, "gateway.db"));
+    db.prepare("INSERT INTO runs (id, workspace_id, session_id, status, created_at) VALUES ('stuck', ?, ?, 'running', 1)").run(
+      workspaceId,
+      sessionId,
+    );
+    db.prepare(
+      "INSERT INTO workspace_locks (workspace_id, kind, holder_type, holder_id, acquired_at) VALUES (?, 'chat', 'run', 'stuck', 1)",
+    ).run(workspaceId);
+    db.close();
+
+    app = await buildApp({
+      dbPath: join(dir, "gateway.db"),
+      adminPassword: password,
+      cookieSecure: true,
+      workspaceRoots: [root],
+      logDir: join(dir, "logs"),
+      agentRuntime: "fake",
+    });
+    const login = await app.inject({ method: "POST", url: "/api/login", payload: { password } });
+    cookie = cookieOf(login.headers["set-cookie"]);
+    const archived = readLog(logFile(join(dir, "logs"), sessionId, "stuck"), 0);
+    expect(archived.events).toEqual([{ type: "error", message: interruptedReply }]);
+    const sent = await authed("POST", `/api/sessions/${sessionId}/messages`, { prompt: "继续", model: "fake" });
+    expect(sent.statusCode).toBe(202);
   });
 
   it("聊天列表可以按 workspace 过滤", async () => {

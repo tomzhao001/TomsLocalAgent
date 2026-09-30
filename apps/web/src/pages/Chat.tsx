@@ -29,10 +29,15 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
   const [chatMode, setChatMode] = useState<"ask" | "plan">("ask");
   const [modelError, setModelError] = useState("");
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   const [error, setError] = useState("");
   const loadSeq = useRef(0);
+  const watchStop = useRef<(() => void) | null>(null);
+  const liveEvents = useRef<LogEvent[]>([]);
+
+  useEffect(() => () => watchStop.current?.(), []);
 
   const activeProvider = sessionId ? (sessions.find((item) => item.id === sessionId)?.provider ?? provider) : provider;
 
@@ -77,7 +82,48 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
     };
   }, [activeProvider]);
 
-  async function loadMessages(id: string, seq: number) {
+  function closeWatch() {
+    watchStop.current?.();
+    watchStop.current = null;
+  }
+
+  function follow(session: string, runId: string, seq: number) {
+    closeWatch();
+    if (seq !== loadSeq.current) return;
+    setActiveRunId(runId);
+    liveEvents.current = [];
+    const source = new EventSource(`/api/runs/${runId}/events`, { withCredentials: true });
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      source.close();
+      if (watchStop.current === finish) watchStop.current = null;
+      if (seq === loadSeq.current) setActiveRunId((current) => (current === runId ? null : current));
+    };
+    source.onmessage = (message) => {
+      if (seq !== loadSeq.current || settled) return;
+      const event = JSON.parse(message.data) as LogEvent;
+      liveEvents.current.push(event);
+      if (event.type === "done") {
+        const events = liveEvents.current;
+        setBubbles((current) => [...current, roundEnd(runId, event.status, events)]);
+        finish();
+        return;
+      }
+      setBubbles((current) => appendLogEvent(current, event));
+    };
+    source.onerror = () => {
+      if (settled || seq !== loadSeq.current || source.readyState !== EventSource.CLOSED) return;
+      finish();
+      void loadMessages(session, seq, true);
+    };
+    watchStop.current = finish;
+  }
+
+  async function loadMessages(id: string, seq: number, archiveOnly = false) {
+    closeWatch();
+    setActiveRunId(null);
     const runs = await fetch(`/api/sessions/${id}/runs`, { credentials: "include" });
     if (!runs.ok || seq !== loadSeq.current) return;
     const rows = (await runs.json()) as RunRow[];
@@ -85,11 +131,17 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
     for (const run of rows) {
       if (seq !== loadSeq.current) return;
       if (run.prompt) next.push({ role: "user", text: run.prompt });
+      if (run.status === "running" && !archiveOnly) {
+        if (seq !== loadSeq.current) return;
+        setBubbles(next);
+        follow(id, run.id, seq);
+        return;
+      }
       const log = await fetch(`/api/runs/${run.id}/log?offset=0`, { credentials: "include" });
       if (seq !== loadSeq.current) return;
       const body = (await log.json()) as { events: LogEvent[]; status: string };
       next = body.events.reduce(appendLogEvent, next);
-      if (body.status !== "running") next.push(roundEnd(run.id, body.status, body.events));
+      next.push(roundEnd(run.id, body.status, body.events));
     }
     if (seq !== loadSeq.current) return;
     setBubbles(next);
@@ -152,27 +204,15 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
     }
     setPrompt("");
     setBubbles((current) => [...current, { role: "user", text }]);
-    let offset = 0;
-    const events: LogEvent[] = [];
-    for (let i = 0; i < 30; i++) {
-      if (seq !== loadSeq.current) return;
-      const log = await fetch(`/api/runs/${body.runId}/log?offset=${offset}`, { credentials: "include" });
-      if (seq !== loadSeq.current) return;
-      const payload = (await log.json()) as { events: LogEvent[]; nextOffset: number; status: string };
-      if (payload.events.length) {
-        events.push(...payload.events);
-        if (seq === loadSeq.current) {
-          setBubbles((current) => payload.events.reduce(appendLogEvent, current));
-        }
-        offset = payload.nextOffset;
-      }
-      if (payload.status !== "running") {
-        const runId = body.runId;
-        setBubbles((current) => [...current, roundEnd(runId, payload.status, events)]);
-        break;
-      }
-      if (document.visibilityState === "hidden") break;
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+    follow(sessionId, body.runId, seq);
+  }
+
+  async function stop() {
+    if (!activeRunId) return;
+    const res = await fetch(`/api/runs/${activeRunId}/cancel`, { method: "POST", credentials: "include" });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      setError(body.message ?? "终止失败");
     }
   }
 
@@ -256,6 +296,16 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
                   </div>
                 ) : bubble.role === "plan" ? (
                   <PlanCard key={index} plan={bubble.plan} />
+                ) : bubble.role === "thinking" ? (
+                  <div key={index} className="mr-auto flex max-w-[80%] flex-col gap-1 text-sm leading-6 text-muted-foreground">
+                    <span className="text-xs">思考</span>
+                    <p className="whitespace-pre-wrap">{bubble.text}</p>
+                  </div>
+                ) : bubble.role === "tool" ? (
+                  <p key={index} className="mr-auto text-xs leading-5 text-muted-foreground">
+                    {bubble.running ? "正在使用" : "已使用"} {bubble.name}
+                    {bubble.detail ? ` ${bubble.detail}` : ""}
+                  </p>
                 ) : (
                   <p
                     key={index}
@@ -271,6 +321,7 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
                   </p>
                 ),
               )}
+              {activeRunId ? <p className="animate-pulse text-xs text-muted-foreground">正在处理…</p> : null}
             </div>
           </ScrollArea>
           <form className="flex flex-col gap-2" onSubmit={(event) => void send(event)}>
@@ -299,9 +350,15 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
                   ))}
                 </SelectContent>
               </Select>
-              <Button type="submit" disabled={!sessionId || !model}>
-                发送
-              </Button>
+              {activeRunId ? (
+                <Button type="button" variant="outline" onClick={() => void stop()}>
+                  终止
+                </Button>
+              ) : (
+                <Button type="submit" disabled={!sessionId || !model}>
+                  发送
+                </Button>
+              )}
             </div>
           </form>
           {modelError ? (

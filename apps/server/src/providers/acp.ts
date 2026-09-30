@@ -161,20 +161,7 @@ async function runTurn(
   const cwd = resolve(input.cwd);
   let sessionId = "";
   let plan: PlanDocument | null = null;
-  let textBuf = "";
-  let thoughtBuf = "";
   const started = new Set<string>();
-
-  const flush = () => {
-    if (textBuf) {
-      emit({ type: "text", text: textBuf });
-      textBuf = "";
-    }
-    if (thoughtBuf) {
-      emit({ type: "thinking", text: thoughtBuf });
-      thoughtBuf = "";
-    }
-  };
 
   const unsubscribe = current.subscribe((message) => {
     if (!message.method) return;
@@ -204,7 +191,6 @@ async function runTurn(
         return;
       }
       plan = created;
-      flush();
       emit({ type: "plan", plan: created });
       current.respond(message.id, { outcome: { outcome: "accepted" } });
       return;
@@ -217,13 +203,11 @@ async function runTurn(
       }
       const todos = mergeTodos(plan?.todos ?? [], update.todos, update.merge);
       plan = { ...(plan ?? { plan: "", todos: [] }), todos };
-      flush();
       emit({ type: "todos", todos });
       current.respond(message.id, { outcome: { outcome: "accepted", todos } });
       return;
     }
     if (message.method === "cursor/ask_question") {
-      flush();
       emit({ type: "text", text: questionText(message.params) });
       current.respond(message.id, { outcome: { outcome: "skipped", reason: "请在下一条消息里回答" } });
       return;
@@ -233,7 +217,6 @@ async function runTurn(
       const name = message.method === "cursor/task" ? "task" : "generate_image";
       const detail = stringOf(params.description);
       const callId = stringOf(params.toolCallId) ?? name;
-      flush();
       emit({ type: "tool-start", callId, name, ...(detail ? { detail } : {}) });
       emit({ type: "tool-end", callId, name, ...(detail ? { detail } : {}) });
       if (message.method === "cursor/task") current.respond(message.id, { outcome: { outcome: "completed" } });
@@ -285,7 +268,6 @@ async function runTurn(
       sessionId,
       prompt: [{ type: "text", text: input.prompt }],
     });
-    flush();
     if (signal?.aborted) return "cancelled";
     const stopReason = stringOf(asRecord(result).stopReason);
     if (stopReason === "cancelled") return "cancelled";
@@ -303,7 +285,6 @@ async function runTurn(
   } finally {
     signal?.removeEventListener("abort", onAbort);
     unsubscribe();
-    flush();
   }
 
   function handleUpdate(update: unknown) {
@@ -311,12 +292,12 @@ async function runTurn(
     const kind = stringOf(raw.sessionUpdate);
     if (kind === "agent_message_chunk") {
       const text = chunkText(raw.content);
-      if (text) textBuf += text;
+      if (text) emit({ type: "text", text });
       return;
     }
     if (kind === "agent_thought_chunk") {
       const text = chunkText(raw.content);
-      if (text) thoughtBuf += text;
+      if (text) emit({ type: "thinking", text });
       return;
     }
     if (kind === "tool_call" || kind === "tool_call_update") {
@@ -327,7 +308,6 @@ async function runTurn(
       const detail = toolDetail(raw.rawInput) ?? locationPath(raw.locations);
       const event = { callId, name, ...(detail ? { detail } : {}) };
       if (status === "completed" || status === "failed") {
-        flush();
         if (!started.has(callId)) {
           started.add(callId);
           emit({ type: "tool-start", ...event });
@@ -337,7 +317,6 @@ async function runTurn(
       }
       if (!started.has(callId)) {
         started.add(callId);
-        flush();
         emit({ type: "tool-start", ...event });
       }
     }
