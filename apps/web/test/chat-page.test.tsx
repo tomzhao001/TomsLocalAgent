@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatPage, cursorChatTitle } from "../src/pages/Chat";
+import { ChatPage, cursorChatTitle, pinnedToBottom } from "../src/pages/Chat";
 
 afterEach(() => {
   cleanup();
@@ -16,6 +16,14 @@ async function chooseRecent(name: string) {
   fireEvent.pointerDown(history!, { button: 0, ctrlKey: false, pointerType: "mouse" });
   fireEvent.click(await screen.findByRole("option", { name }));
 }
+
+describe("贴底判断", () => {
+  it("贴在底部、离开底部、内容还没溢出时分别给出结果", () => {
+    expect(pinnedToBottom(952, 1000, 48)).toBe(true);
+    expect(pinnedToBottom(900, 1000, 48)).toBe(false);
+    expect(pinnedToBottom(0, 80, 200)).toBe(true);
+  });
+});
 
 describe("聊天页", () => {
   it("workspace 的聊天模型会放进发送框，Agent 发送时带上模式", async () => {

@@ -1,5 +1,5 @@
 import { GitBranchPlus, RefreshCw, TriangleAlert } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode, type UIEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +23,11 @@ type Bubble = ChatBubble;
 
 const providerLabels: Record<string, string> = { cursor: "Cursor", opencode: "OpenCode" };
 const recentLimit = 10;
+const pinThreshold = 48;
+
+export function pinnedToBottom(scrollTop: number, scrollHeight: number, clientHeight: number, threshold = pinThreshold): boolean {
+  return scrollHeight - scrollTop - clientHeight <= threshold;
+}
 
 export function cursorChatTitle(createdAt?: number | null): string {
   if (!createdAt) return "Cursor 聊天";
@@ -65,6 +70,14 @@ export function ChatPage({
   const watchStop = useRef<(() => void) | null>(null);
   const liveEvents = useRef<LogEvent[]>([]);
   const createSessionRef = useRef<() => Promise<void>>(async () => {});
+  const logRef = useRef<HTMLDivElement>(null);
+  const pinToBottom = useRef(true);
+
+  useLayoutEffect(() => {
+    const el = logRef.current;
+    if (!el || !pinToBottom.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [bubbles, activeRunId]);
 
   useEffect(() => () => watchStop.current?.(), []);
 
@@ -77,6 +90,7 @@ export function ChatPage({
 
   useEffect(() => {
     let cancelled = false;
+    pinToBottom.current = true;
     void (async () => {
       const res = await fetch(`/api/sessions?workspaceId=${encodeURIComponent(workspaceId)}`, { credentials: "include" });
       if (!res.ok || cancelled) return;
@@ -195,7 +209,14 @@ export function ChatPage({
     setBubbles(next);
   }
 
+  function onLogScroll(event: UIEvent<HTMLDivElement>) {
+    const el = event.currentTarget;
+    if (el.clientHeight === 0) return;
+    pinToBottom.current = pinnedToBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
+  }
+
   async function openSession(id: string) {
+    pinToBottom.current = true;
     setSessionId(id);
     setError("");
     setRefreshing(false);
@@ -205,6 +226,7 @@ export function ChatPage({
 
   async function refresh() {
     if (!sessionId) return;
+    pinToBottom.current = true;
     setRefreshing(true);
     setError("");
     const seq = ++loadSeq.current;
@@ -258,6 +280,7 @@ export function ChatPage({
       return;
     }
     setPrompt("");
+    pinToBottom.current = true;
     setBubbles((current) => [...current, { role: "user", text }]);
     follow(sessionId, body.runId, seq);
   }
@@ -311,7 +334,7 @@ export function ChatPage({
           </CardAction>
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">
+          <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto rounded-lg border" onScroll={onLogScroll}>
             <div className="flex flex-col gap-3 p-3">
               {bubbles.map((bubble, index) =>
                 bubble.role === "end" ? (
