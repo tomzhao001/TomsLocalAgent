@@ -1,32 +1,60 @@
 import { GitBranchPlus, RefreshCw, TriangleAlert } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { SplitDialog } from "@/components/workflow/SplitDialog";
 import { readonlyViolation, type LogEvent, type PlanDocument, type PlanTodo } from "@/lib/api";
 import { appendLogEvent, todoLabel, type ChatBubble } from "./chat-log";
 
-type Session = { id: string; provider: string; workspace_id: string; workspace_name: string; title: string | null };
+type Session = {
+  id: string;
+  provider: string;
+  workspace_id: string;
+  workspace_name: string;
+  title: string | null;
+  created_at?: number | null;
+};
 type RunRow = { id: string; status: string; prompt: string | null };
 type ModelInfo = { id: string; label: string };
 type Bubble = ChatBubble;
 
 const providerLabels: Record<string, string> = { cursor: "Cursor", opencode: "OpenCode" };
+const recentLimit = 10;
 
-export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string; onSplitStarted: () => void }) {
+export function cursorChatTitle(createdAt?: number | null): string {
+  if (!createdAt) return "Cursor 聊天";
+  const date = new Date(createdAt);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `Cursor 聊天 ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function sessionLabel(item: Session): string {
+  if (item.title) return item.title;
+  if (item.provider === "cursor") return cursorChatTitle(item.created_at);
+  return providerLabels[item.provider] ?? item.provider;
+}
+
+export function ChatPage({
+  workspaceId,
+  chatModel = "",
+  onSplitStarted,
+  onToolbar,
+}: {
+  workspaceId: string;
+  chatModel?: string;
+  onSplitStarted: () => void;
+  onToolbar?: (node: ReactNode | null) => void;
+}) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [provider, setProvider] = useState("cursor");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [model, setModel] = useState("");
-  const [chatMode, setChatMode] = useState<"ask" | "plan">("ask");
+  const [chatMode, setChatMode] = useState<"ask" | "plan" | "agent">("agent");
   const [modelError, setModelError] = useState("");
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
@@ -36,6 +64,7 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
   const loadSeq = useRef(0);
   const watchStop = useRef<(() => void) | null>(null);
   const liveEvents = useRef<LogEvent[]>([]);
+  const createSessionRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => () => watchStop.current?.(), []);
 
@@ -47,7 +76,24 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
   }
 
   useEffect(() => {
-    void reloadSessions();
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/sessions?workspaceId=${encodeURIComponent(workspaceId)}`, { credentials: "include" });
+      if (!res.ok || cancelled) return;
+      const rows = (await res.json()) as Session[];
+      if (cancelled) return;
+      setSessions(rows);
+      const latest = rows[0];
+      if (!latest) return;
+      const seq = ++loadSeq.current;
+      setSessionId(latest.id);
+      setError("");
+      setRefreshing(false);
+      await loadMessages(latest.id, seq);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [workspaceId]);
 
   useEffect(() => {
@@ -64,23 +110,25 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
       })
       .then((items) => {
         if (cancelled) return;
-        setModels(items);
+        const listed = withChatModel(items, chatModel);
+        setModels(listed);
         setModel((current) => {
-          if (current && items.some((item) => item.id === current)) return current;
-          return items.find((item) => item.id === "auto")?.id ?? items[0]?.id ?? "";
+          if (current && listed.some((item) => item.id === current)) return current;
+          if (chatModel) return chatModel;
+          return listed.find((item) => item.id === "auto")?.id ?? listed[0]?.id ?? "";
         });
-        if (items.length === 0) setModelError("暂无模型");
+        if (listed.length === 0) setModelError("暂无模型");
       })
       .catch((reason: unknown) => {
         if (cancelled) return;
-        setModels([]);
-        setModel("");
-        setModelError(reason instanceof Error ? reason.message : "模型列表读取失败");
+        setModels(chatModel ? [{ id: chatModel, label: chatModel }] : []);
+        setModel(chatModel);
+        if (!chatModel) setModelError(reason instanceof Error ? reason.message : "模型列表读取失败");
       });
     return () => {
       cancelled = true;
     };
-  }, [activeProvider]);
+  }, [activeProvider, chatModel]);
 
   function closeWatch() {
     watchStop.current?.();
@@ -184,6 +232,13 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
     await openSession(body.id);
   }
 
+  createSessionRef.current = createSession;
+
+  useEffect(() => {
+    onToolbar?.(<ChatToolbar provider={provider} onProvider={setProvider} onCreate={() => void createSessionRef.current()} />);
+    return () => onToolbar?.(null);
+  }, [provider, onToolbar]);
+
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!sessionId || !model) return;
@@ -216,52 +271,32 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
     }
   }
 
+  const recent = sessions.slice(0, recentLimit);
+  const modeHint =
+    activeProvider === "cursor" && chatMode === "agent"
+      ? "Agent 会直接修改这个 workspace 里的文件。"
+      : "只读模式：聊天不会修改代码，改代码请转为工作流。";
+
   return (
-    <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
-      <Card className="min-h-0">
-        <CardHeader>
-          <CardTitle>聊天</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="grid gap-2">
-            <Label>模式</Label>
-            <Select value={provider} onValueChange={setProvider}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
+    <section className="flex min-h-0 flex-1 flex-col">
+      <Card className="flex min-h-0 flex-1 flex-col">
+        <CardHeader className="shrink-0">
+          <CardTitle className="flex items-center gap-2">
+            消息
+            <Select value={sessionId ?? ""} onValueChange={(id) => { if (id) void openSession(id); }} disabled={recent.length === 0}>
+              <SelectTrigger className="w-72 font-normal" aria-label="最近聊天">
+                <SelectValue placeholder="还没有聊天" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="cursor">Cursor</SelectItem>
-                <SelectItem value="opencode">OpenCode</SelectItem>
+                {recent.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {sessionLabel(item)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
-          </div>
-          <Button type="button" onClick={() => void createSession()}>
-            新建聊天
-          </Button>
-          <Separator />
-          <ScrollArea className="h-64">
-            <ul className="flex flex-col gap-1 pr-3">
-              {sessions.length === 0 ? <li className="px-2 text-muted-foreground">还没有聊天</li> : null}
-              {sessions.map((item) => (
-                <li key={item.id}>
-                  <Button
-                    type="button"
-                    variant={sessionId === item.id ? "secondary" : "ghost"}
-                    className="h-auto w-full justify-start px-2 py-1.5 whitespace-normal"
-                    onClick={() => void openSession(item.id)}
-                  >
-                    {item.title ?? providerLabels[item.provider] ?? item.provider}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-        </CardContent>
-      </Card>
-      <Card className="flex min-h-[32rem] flex-col">
-        <CardHeader>
-          <CardTitle>消息</CardTitle>
-          <CardDescription>只读模式：聊天不会修改代码，改代码请转为工作流。</CardDescription>
+          </CardTitle>
+          <CardDescription>{modeHint}</CardDescription>
           <CardAction>
             <Button
               type="button"
@@ -276,7 +311,7 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
           </CardAction>
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-          <ScrollArea className="min-h-48 flex-1 rounded-lg border">
+          <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">
             <div className="flex flex-col gap-3 p-3">
               {bubbles.map((bubble, index) =>
                 bubble.role === "end" ? (
@@ -297,15 +332,17 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
                 ) : bubble.role === "plan" ? (
                   <PlanCard key={index} plan={bubble.plan} />
                 ) : bubble.role === "thinking" ? (
-                  <div key={index} className="mr-auto flex max-w-[80%] flex-col gap-1 text-sm leading-6 text-muted-foreground">
-                    <span className="text-xs">思考</span>
+                  <details key={index} className="mr-auto max-w-[80%] text-sm leading-6 text-muted-foreground">
+                    <summary className="cursor-pointer text-xs">思考</summary>
                     <p className="whitespace-pre-wrap">{bubble.text}</p>
-                  </div>
+                  </details>
                 ) : bubble.role === "tool" ? (
-                  <p key={index} className="mr-auto text-xs leading-5 text-muted-foreground">
-                    {bubble.running ? "正在使用" : "已使用"} {bubble.name}
-                    {bubble.detail ? ` ${bubble.detail}` : ""}
-                  </p>
+                  <details key={index} className="mr-auto text-xs leading-5 text-muted-foreground">
+                    <summary className="cursor-pointer">
+                      {bubble.running ? "正在使用" : "已使用"} {bubble.name}
+                    </summary>
+                    {bubble.detail ? <p className="whitespace-pre-wrap">{bubble.detail}</p> : null}
+                  </details>
                 ) : (
                   <p
                     key={index}
@@ -323,22 +360,40 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
               )}
               {activeRunId ? <p className="animate-pulse text-xs text-muted-foreground">正在处理…</p> : null}
             </div>
-          </ScrollArea>
-          <form className="flex flex-col gap-2" onSubmit={(event) => void send(event)}>
-            <Textarea name="prompt" value={prompt} placeholder="输入消息" onChange={(e) => setPrompt(e.target.value)} />
+          </div>
+          <form className="flex shrink-0 flex-col gap-2" onSubmit={(event) => void send(event)}>
+            <Textarea
+              name="prompt"
+              value={prompt}
+              placeholder="输入消息"
+              className="max-h-40 overflow-y-auto"
+              onChange={(e) => setPrompt(e.target.value)}
+            />
             <div className="flex items-center justify-end gap-2">
               {activeProvider === "cursor" ? (
-                <Select value={chatMode} onValueChange={(value) => setChatMode(value === "plan" ? "plan" : "ask")}>
+                <Select
+                  value={chatMode}
+                  onValueChange={(value) => {
+                    if (value === "plan" || value === "agent" || value === "ask") setChatMode(value);
+                  }}
+                >
                   <SelectTrigger className="w-28" aria-label="对话方式">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ask">提问</SelectItem>
-                    <SelectItem value="plan">出计划</SelectItem>
+                    <SelectItem value="agent">Agent</SelectItem>
+                    <SelectItem value="ask">Ask</SelectItem>
+                    <SelectItem value="plan">Plan</SelectItem>
                   </SelectContent>
                 </Select>
               ) : null}
-              <Select value={model} onValueChange={setModel} disabled={models.length === 0}>
+              <Select
+                value={model}
+                onValueChange={(value) => {
+                  if (value) setModel(value);
+                }}
+                disabled={models.length === 0}
+              >
                 <SelectTrigger className="w-48">
                   <SelectValue placeholder="暂无模型" />
                 </SelectTrigger>
@@ -384,6 +439,38 @@ export function ChatPage({ workspaceId, onSplitStarted }: { workspaceId: string;
       ) : null}
     </section>
   );
+}
+
+function ChatToolbar({
+  provider,
+  onProvider,
+  onCreate,
+}: {
+  provider: string;
+  onProvider: (value: string) => void;
+  onCreate: () => void;
+}) {
+  return (
+    <div className="ml-auto flex items-center gap-2">
+      <Select value={provider} onValueChange={(value) => { if (value) onProvider(value); }}>
+        <SelectTrigger className="w-32" aria-label="模式">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="cursor">Cursor</SelectItem>
+          <SelectItem value="opencode">OpenCode</SelectItem>
+        </SelectContent>
+      </Select>
+      <Button type="button" size="sm" onClick={onCreate}>
+        新建聊天
+      </Button>
+    </div>
+  );
+}
+
+function withChatModel(items: ModelInfo[], chatModel: string): ModelInfo[] {
+  if (!chatModel || items.some((item) => item.id === chatModel)) return items;
+  return [{ id: chatModel, label: chatModel }, ...items];
 }
 
 function PlanCard({ plan }: { plan: PlanDocument }) {

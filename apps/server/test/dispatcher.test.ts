@@ -8,12 +8,28 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openDatabase } from "../src/db.js";
 import { WorkspaceLockManager } from "../src/locks.js";
 import type { AgentRuntime, RunContext } from "../src/runs.js";
-import { Dispatcher, type RequirementRow } from "../src/workflows/_framework/dispatcher.js";
+import { Dispatcher, stepModel, type RequirementRow } from "../src/workflows/_framework/dispatcher.js";
 import { appendRequirements } from "../src/workflows/_framework/split-task.js";
 
 type Script = (input: RunContext) => Promise<void> | void;
 
 const execFileAsync = promisify(execFile);
+
+describe("步骤模型", () => {
+  const fallback = { model: "global-dev", reviewModel: "global-review" };
+
+  it("开发和 Review 用 workspace 上的字符串，其余步骤用全局模型", () => {
+    const workspace = { develop_model: "ws-dev", review_model: "ws-review" };
+    expect(stepModel("develop", workspace, fallback)).toBe("ws-dev");
+    expect(stepModel("review", workspace, fallback)).toBe("ws-review");
+    expect(stepModel("plan", workspace, fallback)).toBe("global-dev");
+    expect(stepModel("qa", workspace, fallback)).toBe("global-dev");
+    expect(stepModel("devops", { develop_model: "", review_model: "" }, fallback)).toBe("global-dev");
+    expect(stepModel("develop", { develop_model: "" }, fallback)).toBe("global-dev");
+    expect(stepModel("review", { review_model: "" }, fallback)).toBe("global-review");
+    expect(stepModel("review", { review_model: "" }, { model: "global-dev" })).toBe("global-dev");
+  });
+});
 const card = (title: string) => ({ title, goal: "目标", context: "背景", acceptanceCriteria: ["能用"] });
 
 function scripted(script: Script = pass) {

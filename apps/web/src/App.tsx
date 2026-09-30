@@ -1,5 +1,5 @@
 import { ArrowLeft, Settings } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +18,7 @@ export function App() {
   const [username, setUsername] = useState<string | null | undefined>(undefined);
   const [page, setPage] = useState<"workspace" | "settings">("workspace");
   const [tab, setTab] = useState<"chat" | "workflow">("chat");
+  const [chatToolbar, setChatToolbar] = useState<ReactNode>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [statuses, setStatuses] = useState<WorkspaceStatus[]>([]);
   const [workspaceId, setWorkspaceId] = useState(() => localStorage.getItem(storageKey) ?? "");
@@ -70,7 +71,7 @@ export function App() {
   const needsYou = attentionOf(current) === "waiting";
 
   return (
-    <div className="flex min-h-svh flex-col">
+    <div className="flex h-svh flex-col overflow-hidden">
       <header className="flex items-center gap-2 border-b px-4 py-3">
         <strong className="mr-1 hidden text-sm sm:inline">AI Gateway</strong>
         {page === "settings" ? (
@@ -106,7 +107,7 @@ export function App() {
           </Button>
         </div>
       </header>
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col p-4">
+      <main className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-y-auto p-4">
         {page === "settings" ? <SettingsPage onChanged={() => void loadWorkspaces()} /> : null}
         {page === "workspace" && workspaces && workspaces.length === 0 ? (
           <Card className="mx-auto w-full max-w-md">
@@ -122,18 +123,27 @@ export function App() {
           </Card>
         ) : null}
         {page === "workspace" && workspaceId && workspaces?.some((item) => item.id === workspaceId) ? (
-          <Tabs value={tab} onValueChange={(value) => setTab(value as "chat" | "workflow")} className="flex-1">
-            <TabsList>
-              <TabsTrigger value="chat">聊天</TabsTrigger>
-              <TabsTrigger value="workflow">
-                工作流
-                <StatusDot attention={needsYou ? "waiting" : "idle"} label="有事项等你处理" />
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="chat" forceMount className="flex flex-col data-[state=inactive]:hidden">
-              <ChatPage key={workspaceId} workspaceId={workspaceId} onSplitStarted={() => setTab("workflow")} />
+          <Tabs value={tab} onValueChange={(value) => setTab(value as "chat" | "workflow")} className="min-h-0 flex-1 overflow-hidden">
+            <div className="flex flex-wrap items-center gap-2">
+              <TabsList>
+                <TabsTrigger value="chat">聊天</TabsTrigger>
+                <TabsTrigger value="workflow">
+                  工作流
+                  <StatusDot attention={needsYou ? "waiting" : "idle"} label="有事项等你处理" />
+                </TabsTrigger>
+              </TabsList>
+              {tab === "chat" ? chatToolbar : null}
+            </div>
+            <TabsContent value="chat" forceMount className="flex min-h-0 flex-col overflow-hidden data-[state=inactive]:hidden">
+              <ChatPage
+                key={workspaceId}
+                workspaceId={workspaceId}
+                chatModel={workspaces?.find((item) => item.id === workspaceId)?.chatModel ?? ""}
+                onSplitStarted={() => setTab("workflow")}
+                onToolbar={setChatToolbar}
+              />
             </TabsContent>
-            <TabsContent value="workflow" forceMount className="flex flex-col data-[state=inactive]:hidden">
+            <TabsContent value="workflow" forceMount className="flex min-h-0 flex-col overflow-y-auto data-[state=inactive]:hidden">
               <WorkflowPage
                 key={workspaceId}
                 workspaceId={workspaceId}

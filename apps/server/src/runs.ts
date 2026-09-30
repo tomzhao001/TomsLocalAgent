@@ -28,7 +28,7 @@ export type RunContext = {
   model: string;
   cwd: string;
   access?: AccessProfile;
-  chatMode?: "ask" | "plan";
+  chatMode?: "ask" | "plan" | "agent";
   agentId?: string | null;
   onAgent?: (agentId: string) => void;
   customTools?: Record<string, GatewayTool>;
@@ -131,7 +131,7 @@ export function registerRuns(
       model,
       cwd: workspace.path,
       access: "chat",
-      chatMode: body.mode === "plan" ? "plan" : "ask",
+      chatMode: body.mode === "plan" ? "plan" : body.mode === "agent" ? "agent" : "ask",
       agentId: session.agent_id,
       onAgent: (agentId) => {
         if (dbOpen(db)) db.prepare("UPDATE chat_sessions SET agent_id = ? WHERE id = ?").run(agentId, session.id);
@@ -151,10 +151,10 @@ export function registerRuns(
     void (async () => {
       let terminal: LiveStatus = "error";
       try {
-        const changed = await watchReadonly(repos);
+        const changed = ctx.chatMode === "agent" ? null : await watchReadonly(repos);
         try {
           const status = await runtime.startRun(ctx, publish, controller.signal);
-          if (await changed()) publish({ type: "error", message: readonlyViolation });
+          if (changed && (await changed())) publish({ type: "error", message: readonlyViolation });
           terminal = status ?? "finished";
         } catch {
           terminal = "error";
@@ -200,7 +200,7 @@ export function registerRuns(
 
   app.get("/api/sessions", async (request) => {
     const { workspaceId } = request.query as { workspaceId?: string };
-    const base = `SELECT s.id, s.provider, s.workspace_id, s.title, w.name AS workspace_name
+    const base = `SELECT s.id, s.provider, s.workspace_id, s.title, s.created_at, w.name AS workspace_name
          FROM chat_sessions s JOIN workspaces w ON w.id = s.workspace_id`;
     if (workspaceId) {
       return db.prepare(`${base} WHERE s.workspace_id = ? ORDER BY s.created_at DESC`).all(workspaceId);

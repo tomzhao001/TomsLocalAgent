@@ -126,9 +126,15 @@ describe("workspace", () => {
       title: "讨论",
     });
     expect(session.statusCode).toBe(201);
-    const renamed = await authed("PATCH", `/api/workspaces/${id}`, { name: "主站改名" });
+    const renamed = await authed("PATCH", `/api/workspaces/${id}`, {
+      name: "主站改名",
+      chatModel: "composer",
+      developModel: "gpt",
+      reviewModel: "sonnet",
+    });
     expect(renamed.statusCode).toBe(200);
     expect(renamed.json().name).toBe("主站改名");
+    expect(renamed.json()).toMatchObject({ chatModel: "composer", developModel: "gpt", reviewModel: "sonnet" });
     const moved = await authed("PATCH", `/api/workspaces/${id}`, { path: other });
     expect(moved.statusCode).toBe(409);
   });

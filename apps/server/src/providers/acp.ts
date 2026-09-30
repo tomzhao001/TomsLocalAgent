@@ -29,8 +29,8 @@ type ToolShape = { kind?: string; name?: string; title?: string; rawInput?: unkn
 const writeKinds = new Set(["edit", "delete", "move", "execute", "switch_mode"]);
 const writeName = /shell|bash|write|edit|delete|apply|terminal|command/i;
 
-export function permissionChoice(tool: ToolShape, options: PermissionOption[]): string | null {
-  const blocked = isWrite(tool);
+export function permissionChoice(tool: ToolShape, options: PermissionOption[], allowWrite = false): string | null {
+  const blocked = isWrite(tool) && !allowWrite;
   const want = blocked ? "reject_once" : "allow_once";
   const fallback = blocked ? "reject_always" : "allow_always";
   const match =
@@ -157,7 +157,8 @@ async function runTurn(
     return "error";
   }
 
-  const mode = input.chatMode === "plan" ? "plan" : "ask";
+  const mode = input.chatMode === "plan" ? "plan" : input.chatMode === "agent" ? "agent" : "ask";
+  const allowWrite = mode === "agent";
   const cwd = resolve(input.cwd);
   let sessionId = "";
   let plan: PlanDocument | null = null;
@@ -180,6 +181,7 @@ async function runTurn(
       const optionId = permissionChoice(
         { kind: stringOf(tool.kind), name: stringOf(tool.name) ?? stringOf(tool.title), title: stringOf(tool.title), rawInput: tool.rawInput },
         options,
+        allowWrite,
       );
       current.respond(message.id, { outcome: optionId ? { outcome: "selected", optionId } : { outcome: "cancelled" } });
       return;

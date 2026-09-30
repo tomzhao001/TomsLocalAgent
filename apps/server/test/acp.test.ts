@@ -30,6 +30,7 @@ describe("ACP 计划与权限", () => {
       { optionId: "reject-once", kind: "reject_once" },
     ];
     expect(permissionChoice({ kind: "execute", title: "shell" }, options)).toBe("reject-once");
+    expect(permissionChoice({ kind: "execute", title: "shell" }, options, true)).toBe("allow-once");
     expect(permissionChoice({ kind: "read", rawInput: { path: "src/a.ts" } }, options)).toBe("allow-once");
   });
 
@@ -179,6 +180,53 @@ describe("ACP 计划与权限", () => {
       { type: "text", text: "你" },
       { type: "text", text: "好" },
     ]);
+  });
+
+  it("Agent 模式切换到 agent，并允许写入", async () => {
+    const agentSession = {
+      ...session,
+      modes: {
+        currentModeId: "agent",
+        availableModes: [
+          { id: "agent", name: "Agent" },
+          { id: "ask", name: "Ask" },
+          { id: "plan", name: "Plan" },
+        ],
+      },
+    };
+    const link = scripted((method, _params, peer) => {
+      if (method === "session/new") return agentSession;
+      if (method === "session/prompt") {
+        peer.emit({
+          id: 9,
+          method: "session/request_permission",
+          params: {
+            sessionId: "sess-1",
+            toolCall: { kind: "edit", title: "write" },
+            options: [
+              { optionId: "allow-once", kind: "allow_once" },
+              { optionId: "reject-once", kind: "reject_once" },
+            ],
+          },
+        });
+        return { stopReason: "end_turn" };
+      }
+      return {};
+    });
+    const runtime = createAcpRuntime(async () => link);
+    const result = await collect(runtime, {
+      sessionId: "s",
+      runId: "r",
+      workspaceId: "w",
+      prompt: "改一下",
+      model: "auto",
+      cwd: "/",
+      access: "chat",
+      chatMode: "agent",
+    });
+    expect(result.status).toBe("finished");
+    expect(link.calls[1]?.params).toMatchObject({ modeId: "agent" });
+    expect(link.replies[0]).toEqual({ id: 9, result: { outcome: { outcome: "selected", optionId: "allow-once" } } });
   });
 
   it("没有模式声明时直接报错，不调用 set_mode", async () => {

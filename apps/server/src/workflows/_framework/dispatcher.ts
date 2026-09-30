@@ -98,6 +98,16 @@ export type DispatcherOptions = {
   intervalMs?: number;
 };
 
+export function stepModel(
+  step: StepId | "qa",
+  workspace: { develop_model?: string | null; review_model?: string | null },
+  fallback: { model: string; reviewModel?: string },
+): string {
+  if (step === "develop" && workspace.develop_model) return workspace.develop_model;
+  if (step === "review") return workspace.review_model || fallback.reviewModel || fallback.model;
+  return fallback.model;
+}
+
 export class Dispatcher {
   private readonly db: DatabaseSync;
   private readonly cfg: LoopConfig;
@@ -229,8 +239,10 @@ export class Dispatcher {
   private launch(row: RequirementRow, action: RunStepAction & { nodeId: StepId | "qa" }): void {
     const runtime = this.options.runtime();
     if (!runtime) return;
-    const workspace = this.db.prepare("SELECT path, repos_json FROM workspaces WHERE id = ?").get(row.workspace_id) as
-      | { path: string; repos_json: string }
+    const workspace = this.db
+      .prepare("SELECT path, repos_json, develop_model, review_model FROM workspaces WHERE id = ?")
+      .get(row.workspace_id) as
+      | { path: string; repos_json: string; develop_model: string | null; review_model: string | null }
       | undefined;
     if (!workspace) return;
     const card = JSON.parse(row.card_json) as RequirementCard;
@@ -293,7 +305,7 @@ export class Dispatcher {
             runId: stepRunId,
             workspaceId: row.workspace_id,
             prompt,
-            model: this.modelFor(action.nodeId),
+            model: this.modelFor(action.nodeId, workspace),
             cwd: workspace.path,
             access: stepAccess[action.nodeId],
             agentId: keepAgent ? row.agent_id : null,
@@ -413,9 +425,11 @@ export class Dispatcher {
     return row.state_json ? normalizeLoopState(JSON.parse(row.state_json)) : initialLoopState(1);
   }
 
-  private modelFor(step: StepId | "qa"): string {
-    if (step === "review" && this.options.reviewModel) return this.options.reviewModel;
-    return this.options.model;
+  private modelFor(
+    step: StepId | "qa",
+    workspace: { develop_model: string | null; review_model: string | null },
+  ): string {
+    return stepModel(step, workspace, { model: this.options.model, reviewModel: this.options.reviewModel });
   }
 
   private async reviewDiff(workspace: { path: string; repos_json: string }): Promise<string> {

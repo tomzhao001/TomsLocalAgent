@@ -9,6 +9,9 @@ type WorkspaceRow = {
   path: string;
   repos_json: string;
   archived: number;
+  chat_model?: string | null;
+  develop_model?: string | null;
+  review_model?: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -48,10 +51,19 @@ export function registerWorkspaces(
     const { id } = request.params as { id: string };
     const current = row(db, id);
     if (!current) return reply.code(404).send({ error: "not_found", message: "workspace 不存在" });
-    const body = request.body as { name?: string; path?: string };
+    const body = request.body as {
+      name?: string;
+      path?: string;
+      chatModel?: string;
+      developModel?: string;
+      reviewModel?: string;
+    };
     let name = current.name;
     let path = current.path;
     let repos = current.repos_json;
+    let chatModel = current.chat_model ?? "";
+    let developModel = current.develop_model ?? "";
+    let reviewModel = current.review_model ?? "";
     if (body.name?.trim()) name = body.name.trim();
     if (body.path?.trim()) {
       if (referenceCount(db, id) > 0) {
@@ -64,13 +76,12 @@ export function registerWorkspaces(
       path = normalized.path;
       repos = JSON.stringify(scanGitRepos(path));
     }
-    db.prepare("UPDATE workspaces SET name = ?, path = ?, repos_json = ?, updated_at = ? WHERE id = ?").run(
-      name,
-      path,
-      repos,
-      Date.now(),
-      id,
-    );
+    if (typeof body.chatModel === "string") chatModel = body.chatModel.trim();
+    if (typeof body.developModel === "string") developModel = body.developModel.trim();
+    if (typeof body.reviewModel === "string") reviewModel = body.reviewModel.trim();
+    db.prepare(
+      "UPDATE workspaces SET name = ?, path = ?, repos_json = ?, chat_model = ?, develop_model = ?, review_model = ?, updated_at = ? WHERE id = ?",
+    ).run(name, path, repos, chatModel, developModel, reviewModel, Date.now(), id);
     return load(db, id);
   });
 
@@ -178,6 +189,9 @@ function toDto(row: WorkspaceRow) {
     path: row.path,
     repos: JSON.parse(row.repos_json) as string[],
     archived: row.archived === 1,
+    chatModel: row.chat_model ?? "",
+    developModel: row.develop_model ?? "",
+    reviewModel: row.review_model ?? "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

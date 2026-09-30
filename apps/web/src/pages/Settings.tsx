@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,10 +12,16 @@ type Workspace = {
   path: string;
   repos: string[];
   archived: boolean;
+  chatModel?: string;
+  developModel?: string;
+  reviewModel?: string;
 };
+
+type ModelInfo = { id: string; label: string };
 
 export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   const [items, setItems] = useState<Workspace[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
@@ -33,6 +40,12 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
 
   useEffect(() => {
     void load();
+    void fetch("/api/providers/cursor/models", { credentials: "include" })
+      .then(async (res) => {
+        const body = (await res.json().catch(() => [])) as ModelInfo[];
+        if (res.ok && Array.isArray(body)) setModels(body);
+      })
+      .catch(() => {});
   }, []);
 
   async function browse() {
@@ -163,8 +176,9 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
               </CardTitle>
               <CardDescription>{item.path}</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col gap-3">
               <p className="text-muted-foreground">仓库：{item.repos.length === 0 ? "无" : item.repos.join("，")}</p>
+              <ModelFields item={item} models={models} onError={setError} onSaved={() => void reload()} />
             </CardContent>
             <CardFooter className="gap-2">
               <Button type="button" size="sm" variant="outline" onClick={() => void rename(item)}>
@@ -184,5 +198,131 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
         ))}
       </div>
     </section>
+  );
+}
+
+function ModelFields({
+  item,
+  models,
+  onError,
+  onSaved,
+}: {
+  item: Workspace;
+  models: ModelInfo[];
+  onError: (message: string) => void;
+  onSaved: () => void;
+}) {
+  const [chatModel, setChatModel] = useState(item.chatModel ?? "");
+  const [developModel, setDevelopModel] = useState(item.developModel ?? "");
+  const [reviewModel, setReviewModel] = useState(item.reviewModel ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setChatModel(item.chatModel ?? "");
+    setDevelopModel(item.developModel ?? "");
+    setReviewModel(item.reviewModel ?? "");
+  }, [item.chatModel, item.developModel, item.reviewModel]);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    onError("");
+    const res = await fetch(`/api/workspaces/${item.id}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chatModel, developModel, reviewModel }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      onError(body.message ?? "模型保存失败");
+      return;
+    }
+    onSaved();
+  }
+
+  return (
+    <form className="grid gap-3 sm:grid-cols-3" onSubmit={(event) => void save(event)}>
+      <ModelSelect id={`${item.id}-chat-model`} label="聊天默认模型" value={chatModel} models={models} onChange={setChatModel} />
+      <ModelSelect
+        id={`${item.id}-develop-model`}
+        label="工作流开发默认模型"
+        value={developModel}
+        models={models}
+        onChange={setDevelopModel}
+      />
+      <div className="grid gap-2 sm:col-span-2 sm:grid-cols-[1fr_auto] sm:items-end">
+        <ModelSelect
+          id={`${item.id}-review-model`}
+          label="工作流 Review 默认模型"
+          value={reviewModel}
+          models={models}
+          onChange={setReviewModel}
+        />
+        <Button type="submit" size="sm" variant="outline" disabled={saving}>
+          保存模型
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ModelSelect({
+  id,
+  label,
+  value,
+  models,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  models: ModelInfo[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="relative flex gap-1">
+        <Input
+          id={id}
+          className="min-w-0 flex-1"
+          value={value}
+          placeholder="留空则沿用环境变量"
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          aria-label={`${label}候选`}
+          aria-expanded={open}
+          disabled={models.length === 0}
+          onClick={() => setOpen((current) => !current)}
+        >
+          <ChevronDown />
+        </Button>
+        {open ? (
+          <ul className="absolute top-full right-0 z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md">
+            {models.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                  onClick={() => {
+                    onChange(item.id);
+                    setOpen(false);
+                  }}
+                >
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
   );
 }
