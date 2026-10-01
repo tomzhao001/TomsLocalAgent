@@ -59,9 +59,7 @@ cat >"$PLIST" <<EOF
 </plist>
 EOF
 
-target="$(service_target)"
-launchctl bootstrap "$target" "$PLIST"
-launchctl kickstart -k "$target/$LABEL"
+load_service
 
 port="$(gateway_port)"
 for _ in $(seq 1 30); do

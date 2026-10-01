@@ -61,6 +61,71 @@ service_target() { printf 'gui/%s' "$(id -u)"; }
 
 service_loaded() { launchctl print "$(service_target)/$LABEL" >/dev/null 2>&1; }
 
+bootout_service() {
+  launchctl bootout "$(service_target)/$LABEL" >/dev/null 2>&1 || true
+  if [[ -f "$PLIST" ]]; then
+    launchctl bootout "$(service_target)" "$PLIST" >/dev/null 2>&1 || true
+  fi
+}
+
+# bootstrap 在服务已注册时会报 5：Input/output error。部分系统上即使没注册也会这样，这时改走 launchctl load。
+load_service() {
+  local target bootstrap_err="" load_err="" owner
+  target="$(service_target)"
+
+  if [[ ! -x "$NODE_BIN" ]]; then
+    echo "找不到可执行文件：$NODE_BIN" >&2
+    return 1
+  fi
+  if [[ ! -f "$APP_ENTRY" ]]; then
+    echo "找不到程序入口：$APP_ENTRY" >&2
+    return 1
+  fi
+  owner="$(stat -f %u "$PLIST")"
+  if [[ "$owner" -ne "$(id -u)" ]]; then
+    echo "服务文件不属于当前用户：$PLIST" >&2
+    echo "请执行：sudo chown \"$(id -un)\" \"$PLIST\"" >&2
+    return 1
+  fi
+  chmod 644 "$PLIST"
+  if ! plutil -lint "$PLIST" >/dev/null; then
+    echo "服务描述文件格式不对：$PLIST" >&2
+    plutil -lint "$PLIST" >&2 || true
+    return 1
+  fi
+
+  launchctl enable "$target/$LABEL" >/dev/null 2>&1 || true
+  bootout_service
+  local i
+  for i in $(seq 1 10); do
+    if service_loaded; then
+      sleep 0.3
+    else
+      break
+    fi
+  done
+
+  if ! service_loaded; then
+    bootstrap_err="$(launchctl bootstrap "$target" "$PLIST" 2>&1)" || true
+  fi
+  if ! service_loaded; then
+    echo "launchctl bootstrap 没有注册成功，改用 launchctl load。" >&2
+    load_err="$(launchctl load -w "$PLIST" 2>&1)" || true
+  fi
+  if ! service_loaded; then
+    if [[ -n "$bootstrap_err" ]]; then
+      echo "$bootstrap_err" >&2
+    fi
+    if [[ -n "$load_err" ]]; then
+      echo "$load_err" >&2
+    fi
+    echo "注册后台服务失败。若上面是 Input/output error，多半是同名服务还占着，或这个 plist 之前被禁用了。" >&2
+    echo "可查看：launchctl print \"$target/$LABEL\"" >&2
+    return 1
+  fi
+  launchctl kickstart -k "$target/$LABEL" >/dev/null 2>&1 || true
+}
+
 require_gui_session() {
   refuse_root
   if gui_session_available; then
