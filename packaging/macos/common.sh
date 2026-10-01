@@ -74,6 +74,12 @@ load_service() {
   target="$(service_target)"
 
   if [[ ! -x "$NODE_BIN" ]]; then
+    if [[ "$(basename "$GATEWAY_ROOT")" == "packaging" && -f "$GATEWAY_ROOT/../scripts/package-macos.sh" ]]; then
+      echo "这是源码里的启动脚本，旁边没有打包好的 Node。" >&2
+      echo "请先在仓库根目录执行 ./scripts/package-macos.sh，把生成的压缩包解压到固定目录后再运行其中的 ./macos/install-service.sh。" >&2
+      echo "不要直接运行 packaging/macos/install-service.sh。" >&2
+      return 1
+    fi
     echo "找不到可执行文件：$NODE_BIN" >&2
     return 1
   fi
