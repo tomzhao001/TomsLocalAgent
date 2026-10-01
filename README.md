@@ -110,6 +110,8 @@ cd ~/Apps/TomsGateway
 
 同样是第一次生成 `gateway.env` 后退出，改好后再运行一次。脚本会先去掉 Gatekeeper 的隔离标记，然后注册 `~/Library/LaunchAgents/com.toms.gateway.plist`，登录后自动启动，退出后自动拉起。`macos/` 下的其他脚本和 Windows 一一对应（`status.sh`、`stop.sh`、`logs.sh --errors --follow`、`start.sh`、`opencode-auth.sh`、`uninstall-service.sh`）。
 
+请用要运行 Gateway 的那个用户，在已经登录的桌面里打开「终端」执行。不要加 `sudo`，也不要从 SSH 里执行。SSH 会话没有图形登录域，`launchctl bootstrap` 会报 `125: Domain does not support specified action`。停服务和查看状态也同样要在桌面终端里做。
+
 ### 升级
 
 1. 运行 `stop`

@@ -47,7 +47,34 @@ assert_ports_free() {
 
 gateway_healthy() { curl -fsS --max-time 3 "http://127.0.0.1:$(gateway_port)/healthz" >/dev/null 2>&1; }
 
-service_loaded() { launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; }
+refuse_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    echo "请不要用 sudo 运行。服务要注册在当前登录用户下，直接执行 ./macos/install-service.sh。" >&2
+    exit 1
+  fi
+}
+
+# gui 域只在桌面登录会话里存在。SSH 和 sudo 下会得到 125：Domain does not support specified action。
+gui_session_available() { launchctl print "gui/$(id -u)" >/dev/null 2>&1; }
+
+service_target() { printf 'gui/%s' "$(id -u)"; }
+
+service_loaded() { launchctl print "$(service_target)/$LABEL" >/dev/null 2>&1; }
+
+require_gui_session() {
+  refuse_root
+  if gui_session_available; then
+    return 0
+  fi
+  local session
+  session="$(launchctl managername 2>/dev/null || true)"
+  echo "当前没有图形登录会话，launchctl 无法注册服务（125：Domain does not support specified action）。" >&2
+  if [[ -n "$session" ]]; then
+    echo "当前会话类型：${session}。" >&2
+  fi
+  echo "请用要运行 Gateway 的用户登录这台 Mac 的桌面，打开「终端」后再执行，不要加 sudo，也不要从 SSH 里执行。" >&2
+  exit 1
+}
 
 xml_escape() {
   printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'

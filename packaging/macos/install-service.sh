@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 注册登录后自动启动的 LaunchAgent，并立即启动。重复运行等于重启。
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+require_gui_session
 
 xattr -dr com.apple.quarantine "$GATEWAY_ROOT" 2>/dev/null || true
 mkdir -p "$DATA_DIR" "$LOG_DIR" "$(dirname "$PLIST")"
@@ -58,8 +59,9 @@ cat >"$PLIST" <<EOF
 </plist>
 EOF
 
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
-launchctl kickstart -k "gui/$(id -u)/$LABEL"
+target="$(service_target)"
+launchctl bootstrap "$target" "$PLIST"
+launchctl kickstart -k "$target/$LABEL"
 
 port="$(gateway_port)"
 for _ in $(seq 1 30); do
