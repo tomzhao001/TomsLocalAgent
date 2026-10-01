@@ -1,3 +1,6 @@
+# macOS Finder 在每个打开过的目录里生成的元数据
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
