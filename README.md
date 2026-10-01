@@ -62,7 +62,7 @@ Windows（在 Windows 上运行）：
 .\scripts\package-windows.ps1
 ```
 
-输出 `dist\TomsGateway-<版本>-win-x64.zip`。
+输出 `dist\TomsGateway-<版本>-win-x64\`。加上 `-Zip` 才额外生成同名 zip。
 
 macOS（在 Mac 上运行，架构按 `uname -m` 自动选择 arm64 或 x64）：
 
@@ -70,9 +70,9 @@ macOS（在 Mac 上运行，架构按 `uname -m` 自动选择 arm64 或 x64）�
 ./scripts/package-macos.sh
 ```
 
-输出 `dist/TomsGateway-<版本>-darwin-<arch>.tar.gz`。
+输出 `dist/TomsGateway-<版本>-darwin-<arch>/`。加上 `--tar` 才额外生成同名 tar.gz。
 
-两个脚本都可以加 `-SkipInstall` / `--skip-install` 跳过 `pnpm install`。
+两个脚本都可以加 `-SkipInstall` / `--skip-install` 跳过 `pnpm install`。打包时会把本机用户数据目录里的 `gateway.env` 复制进输出目录；这个文件不存在就会失败。
 
 ## 安装与运行
 
@@ -90,7 +90,7 @@ cd D:\Apps\TomsGateway
 powershell -ExecutionPolicy Bypass -File .\windows\install-service.ps1
 ```
 
-第一次运行会生成 `gateway.env` 然后退出。改好 `ADMIN_PASSWORD` 和 `WORKSPACE_ROOTS` 之后再运行一次，就会在「任务计划程序」里注册 `TomsGateway`，登录后自动启动，进程意外退出时 10 秒后自动拉起。
+用户数据目录里还没有 `gateway.env` 时，会从安装目录复制一份再继续。密码仍是 `change-me` 或为空时会退出，改好后再运行一次。注册成功后，`TomsGateway` 在登录后自动启动，进程意外退出时 10 秒后自动拉起。
 
 `windows\` 下的其他脚本：
 
@@ -108,7 +108,7 @@ cd ~/Apps/TomsGateway
 ./macos/install-service.sh
 ```
 
-同样是第一次生成 `gateway.env` 后退出，改好后再运行一次。脚本会先去掉 Gatekeeper 的隔离标记，然后注册 `~/Library/LaunchAgents/com.toms.gateway.plist`，登录后自动启动，退出后自动拉起。`macos/` 下的其他脚本和 Windows 一一对应（`status.sh`、`stop.sh`、`logs.sh --errors --follow`、`start.sh`、`opencode-auth.sh`、`uninstall-service.sh`）。
+用户数据目录里还没有 `gateway.env` 时，会从安装目录复制一份再继续。密码仍是 `change-me` 或为空时会退出，改好后再运行一次。脚本会先去掉 Gatekeeper 的隔离标记，然后注册 `~/Library/LaunchAgents/com.toms.gateway.plist`，登录后自动启动，退出后自动拉起。`macos/` 下的其他脚本和 Windows 一一对应（`status.sh`、`stop.sh`、`logs.sh --errors --follow`、`start.sh`、`opencode-auth.sh`、`uninstall-service.sh`）。
 
 请用要运行 Gateway 的那个用户，在已经登录的桌面里打开「终端」执行。不要加 `sudo`，也不要从 SSH 里执行。SSH 会话没有图形登录域，`launchctl bootstrap` 会报 `125: Domain does not support specified action`。停服务和查看状态也同样要在桌面终端里做。`Bootstrap failed: 5: Input/output error` 表示同名服务已经注册，或当前系统上 `bootstrap` 没有生效；安装脚本会先卸掉旧服务，不行再改用 `launchctl load`。
 

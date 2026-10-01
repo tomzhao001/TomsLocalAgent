@@ -4,10 +4,13 @@
 New-Item -ItemType Directory -Force -Path $DataDir, $LogDir | Out-Null
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
-  Copy-Item -LiteralPath (Join-Path $GatewayRoot "gateway.env.example") -Destination $EnvFile
-  Write-Host "已生成配置文件：$EnvFile"
-  Write-Host "请先设置 ADMIN_PASSWORD 和 WORKSPACE_ROOTS，保存后重新运行本脚本。"
-  exit 1
+  $packaged = Join-Path $GatewayRoot "gateway.env"
+  if (-not (Test-Path -LiteralPath $packaged)) {
+    Write-Host "找不到配置文件：$packaged"
+    exit 1
+  }
+  Copy-Item -LiteralPath $packaged -Destination $EnvFile
+  Write-Host "已复制配置文件：$EnvFile"
 }
 
 $cfg = Read-GatewayEnv $EnvFile

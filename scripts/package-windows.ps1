@@ -1,5 +1,6 @@
-﻿# 在 Windows 上打包 TomsGateway，输出 dist\TomsGateway-<版本>-win-x64.zip。
-param([switch]$SkipInstall)
+﻿# 在 Windows 上打包 TomsGateway，输出 dist\TomsGateway-<版本>-win-x64\。
+# 加上 -Zip 才额外生成同名 zip。-SkipInstall 跳过 pnpm install。
+param([switch]$SkipInstall, [switch]$Zip)
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -56,17 +57,24 @@ Remove-Item -LiteralPath $unpack -Recurse -Force
 
 Write-Host "==> 复制启动脚本"
 Copy-Item -LiteralPath (Join-Path $Root "packaging\windows") -Destination (Join-Path $Stage "windows") -Recurse
-Copy-Item -LiteralPath (Join-Path $Root "packaging\gateway.env.example") -Destination (Join-Path $Stage "gateway.env.example")
+$envSource = Join-Path $env:LOCALAPPDATA "TomsGateway\gateway.env"
+if (-not (Test-Path -LiteralPath $envSource)) {
+  throw "找不到配置文件：$envSource。请先在本机准备好 gateway.env，再重新打包。"
+}
+Copy-Item -LiteralPath $envSource -Destination (Join-Path $Stage "gateway.env")
 $utf8Bom = New-Object System.Text.UTF8Encoding $true
 foreach ($file in Get-ChildItem -LiteralPath (Join-Path $Stage "windows") -Filter "*.ps1") {
   $text = [System.IO.File]::ReadAllText($file.FullName)
   [System.IO.File]::WriteAllText($file.FullName, $text, $utf8Bom)
 }
 
-Write-Host "==> 压缩"
-$zipOut = Join-Path $Root "dist\$Name.zip"
-if (Test-Path -LiteralPath $zipOut) { Remove-Item -LiteralPath $zipOut -Force }
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory($Stage, $zipOut, [System.IO.Compression.CompressionLevel]::Optimal, $true)
-$sizeMb = [math]::Round((Get-Item -LiteralPath $zipOut).Length / 1MB, 1)
-Write-Host "已生成：$zipOut（$sizeMb MB）"
+Write-Host "已生成：$Stage"
+if ($Zip) {
+  Write-Host "==> 压缩"
+  $zipOut = Join-Path $Root "dist\$Name.zip"
+  if (Test-Path -LiteralPath $zipOut) { Remove-Item -LiteralPath $zipOut -Force }
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  [System.IO.Compression.ZipFile]::CreateFromDirectory($Stage, $zipOut, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+  $sizeMb = [math]::Round((Get-Item -LiteralPath $zipOut).Length / 1MB, 1)
+  Write-Host "已生成：$zipOut（$sizeMb MB）"
+}

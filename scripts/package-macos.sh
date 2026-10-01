@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
-# 在 macOS 上打包 TomsGateway，输出 dist/TomsGateway-<版本>-darwin-<arch>.tar.gz。
+# 在 macOS 上打包 TomsGateway，输出 dist/TomsGateway-<版本>-darwin-<arch>/。
+# 加上 --tar 才额外生成同名 tar.gz。--skip-install 跳过 pnpm install。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+SKIP_INSTALL=0
+MAKE_TAR=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-install) SKIP_INSTALL=1 ;;
+    --tar) MAKE_TAR=1 ;;
+    *) echo "未知参数：${arg}" >&2; exit 1 ;;
+  esac
+done
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "请在 macOS 上运行本脚本。" >&2
@@ -23,7 +34,7 @@ STAGE="$ROOT/dist/$NAME"
 CACHE="$ROOT/dist/cache"
 mkdir -p "$CACHE"
 
-if [[ "${1:-}" != "--skip-install" ]]; then
+if [[ "$SKIP_INSTALL" -eq 0 ]]; then
   echo "==> 安装依赖"
   pnpm install --frozen-lockfile
 fi
@@ -60,10 +71,19 @@ tar -xzf "$CACHE/$TARBALL" -C "$STAGE/node" --strip-components 1
 
 echo "==> 复制启动脚本"
 cp -R "$ROOT/packaging/macos" "$STAGE/macos"
-cp "$ROOT/packaging/gateway.env.example" "$STAGE/gateway.env.example"
+ENV_SOURCE="$HOME/Library/Application Support/TomsGateway/gateway.env"
+if [[ ! -f "$ENV_SOURCE" ]]; then
+  echo "找不到配置文件：${ENV_SOURCE}" >&2
+  echo "请先在本机准备好 gateway.env，再重新打包。" >&2
+  exit 1
+fi
+cp "$ENV_SOURCE" "$STAGE/gateway.env"
 chmod +x "$STAGE"/macos/*.sh
 
-echo "==> 压缩"
-rm -f "$ROOT/dist/$NAME.tar.gz"
-tar -czf "$ROOT/dist/$NAME.tar.gz" -C "$ROOT/dist" "$NAME"
-echo "已生成：$ROOT/dist/$NAME.tar.gz"
+echo "已生成：${STAGE}"
+if [[ "$MAKE_TAR" -eq 1 ]]; then
+  echo "==> 压缩"
+  rm -f "$ROOT/dist/$NAME.tar.gz"
+  tar -czf "$ROOT/dist/$NAME.tar.gz" -C "$ROOT/dist" "$NAME"
+  echo "已生成：$ROOT/dist/$NAME.tar.gz"
+fi

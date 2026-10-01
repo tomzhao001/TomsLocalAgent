@@ -7,10 +7,12 @@ xattr -dr com.apple.quarantine "$GATEWAY_ROOT" 2>/dev/null || true
 mkdir -p "$DATA_DIR" "$LOG_DIR" "$(dirname "$PLIST")"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  cp "$GATEWAY_ROOT/gateway.env.example" "$ENV_FILE"
-  echo "已生成配置文件：$ENV_FILE"
-  echo "请先设置 ADMIN_PASSWORD 和 WORKSPACE_ROOTS，保存后重新运行本脚本。"
-  exit 1
+  if [[ ! -f "$GATEWAY_ROOT/gateway.env" ]]; then
+    echo "找不到配置文件：$GATEWAY_ROOT/gateway.env" >&2
+    exit 1
+  fi
+  cp "$GATEWAY_ROOT/gateway.env" "$ENV_FILE"
+  echo "已复制配置文件：${ENV_FILE}"
 fi
 
 password="$(gateway_setting ADMIN_PASSWORD "")"
