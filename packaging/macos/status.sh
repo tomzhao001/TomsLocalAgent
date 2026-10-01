@@ -14,7 +14,7 @@ else
 fi
 
 port="$(gateway_port)"
-if gateway_healthy; then echo "健康检查：正常 http://127.0.0.1:$port"; else echo "健康检查：无响应（端口 $port）"; fi
+if gateway_healthy; then echo "健康检查：正常 http://127.0.0.1:${port}"; else echo "健康检查：无响应（端口 ${port}）"; fi
 
 echo "配置文件：$ENV_FILE"
 echo "日志：$LOG_FILE"

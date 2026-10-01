@@ -6,7 +6,7 @@ require_gui_session
 "$GATEWAY_ROOT/macos/stop.sh" --quiet
 if [[ -f "$PLIST" ]]; then
   rm -f "$PLIST"
-  echo "已删除后台服务 $LABEL。"
+  echo "已删除后台服务 ${LABEL}。"
 else
   echo "后台服务 $LABEL 没有注册。"
 fi

@@ -64,8 +64,8 @@ load_service
 port="$(gateway_port)"
 for _ in $(seq 1 30); do
   if gateway_healthy; then
-    echo "Gateway 已启动：http://127.0.0.1:$port"
-    echo "手机访问：在本机执行 tailscale serve --bg $port，然后打开 tailscale 给出的 https 地址。"
+    echo "Gateway 已启动：http://127.0.0.1:${port}"
+    echo "手机访问：在本机执行 tailscale serve --bg ${port}，然后打开 tailscale 给出的 https 地址。"
     exit 0
   fi
   sleep 1
