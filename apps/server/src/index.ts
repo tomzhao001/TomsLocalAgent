@@ -15,7 +15,7 @@ let cursorAcp: { runtime: AgentRuntime; close: () => void } | null = null;
 
 if (!config.fakeRuntime && config.cursorApiKey) {
   const sdk = await loadCursorRuntime(config.cursorApiKey);
-  cursorAcp = await openCursorAcp({ bin: process.env.CURSOR_AGENT_BIN || "agent", apiKey: config.cursorApiKey });
+  cursorAcp = await openCursorAcp({ apiKey: config.cursorApiKey });
   runtimes.cursor = routeCursorRuntime(sdk, cursorAcp?.runtime ?? null);
 }
 if (!config.fakeRuntime && config.opencode.enabled) {

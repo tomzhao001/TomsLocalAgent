@@ -1,6 +1,6 @@
 import type { GatewayEvent } from "@gateway/shared";
 import type { AgentRuntime, GatewayTool, RunContext } from "../runs.js";
-import { cursorAccess, withRules, type CursorAccess } from "./access.js";
+import { accessForChat, cursorAccess, promptWithRules, withRules, type CursorAccess } from "./access.js";
 import { classifyCursorFailure, mapCursorEvent, type CursorStreamEvent, type ModelInfo } from "./map.js";
 
 export type CursorRun = {
@@ -36,11 +36,11 @@ export function createCursorRuntime(sdk: CursorSdk): AgentRuntime {
     async startRun(input, emit, signal) {
       try {
         const profile = input.access ?? "chat";
-        const access = cursorAccess[profile];
+        const access = profile === "chat" ? accessForChat(input.chatMode) : cursorAccess[profile];
         const options = { cwd: input.cwd, model: input.model, access };
         const agent = input.agentId ? await sdk.resume(input.agentId, options) : await sdk.create(options);
         if (agent.agentId !== input.agentId) input.onAgent?.(agent.agentId);
-        const run = await agent.send(withRules(profile, input.prompt), {
+        const run = await agent.send(profile === "chat" ? promptWithRules(access, input.prompt) : withRules(profile, input.prompt), {
           model: { id: input.model },
           mode: access.mode,
           customTools: input.customTools,

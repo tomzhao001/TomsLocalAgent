@@ -131,7 +131,7 @@ describe("注入的 SDK", () => {
   });
 
   it("聊天档位只读，create 和 resume 都带上 mode 和工具白名单", async () => {
-    const calls: { kind: "create" | "resume"; options: CursorAgentOptions; send?: CursorSendOptions }[] = [];
+    const calls: { kind: "create" | "resume"; options: CursorAgentOptions; send?: CursorSendOptions; prompt?: string }[] = [];
     const runtime = createCursorRuntime(recordingCursor(calls));
     const saved: string[] = [];
     const base = { sessionId: "s", runId: "r", workspaceId: "w", prompt: "看看", model: "m", cwd: "/" };
@@ -142,6 +142,7 @@ describe("注入的 SDK", () => {
     for (const call of calls) {
       expect(call.options.access.mode).toBe("plan");
       expect(call.options.access.tools).toBeDefined();
+      expect(call.prompt).toContain("只读");
       for (const banned of ["edit", "delete", "shell", "applyAgentDiff", "task", "mcp"]) {
         expect(call.options.access.tools).not.toContain(banned);
       }
@@ -162,6 +163,27 @@ describe("注入的 SDK", () => {
     expect(cursorAccess.review.tools).not.toContain("shell");
     expect(cursorAccess.qa.tools).toContain("shell");
     expect(cursorAccess.devops.tools).toContain("shell");
+  });
+
+  it("聊天模式随每条消息切换，Agent 不加只读纪律", async () => {
+    const calls: { kind: "create" | "resume"; options: CursorAgentOptions; send?: CursorSendOptions; prompt?: string }[] = [];
+    const runtime = createCursorRuntime(recordingCursor(calls));
+    const base = { sessionId: "s", runId: "r", workspaceId: "w", prompt: "看看", model: "m", cwd: "/", access: "chat" as const };
+    await runtime.startRun({ ...base, chatMode: "plan", agentId: null }, () => {});
+    await runtime.startRun({ ...base, chatMode: "ask", agentId: "agent-1" }, () => {});
+    await runtime.startRun({ ...base, chatMode: "agent", agentId: "agent-1" }, () => {});
+    expect(calls.map((call) => call.kind)).toEqual(["create", "resume", "resume"]);
+    expect(calls[0]?.options.access.mode).toBe("plan");
+    expect(calls[0]?.options.access.tools).toEqual(expect.arrayContaining(["read"]));
+    expect(calls[0]?.options.access.tools).not.toContain("shell");
+    expect(calls[0]?.send?.mode).toBe("plan");
+    expect(calls[0]?.prompt).toBe("看看");
+    expect(calls[1]?.options.access).toMatchObject({ mode: "plan" });
+    expect(calls[1]?.options.access.tools).not.toContain("shell");
+    expect(calls[1]?.prompt).toBe("看看");
+    expect(calls[2]?.options.access).toEqual({ mode: "agent", rules: "" });
+    expect(calls[2]?.send?.mode).toBe("agent");
+    expect(calls[2]?.prompt).toBe("看看");
   });
 
   it("OpenCode 拒绝非聊天的运行", async () => {
@@ -234,11 +256,14 @@ function scriptedCursor(models: string[]): CursorSdk {
   }
 }
 
-function recordingCursor(calls: { kind: "create" | "resume"; options: CursorAgentOptions; send?: CursorSendOptions }[]): CursorSdk {
-  const agent = (entry: { send?: CursorSendOptions }) => ({
+function recordingCursor(
+  calls: { kind: "create" | "resume"; options: CursorAgentOptions; send?: CursorSendOptions; prompt?: string }[],
+): CursorSdk {
+  const agent = (entry: { send?: CursorSendOptions; prompt?: string }) => ({
     agentId: "agent-1",
-    async send(_prompt: string, options: CursorSendOptions) {
+    async send(prompt: string, options: CursorSendOptions) {
       entry.send = options;
+      entry.prompt = prompt;
       return {
         async *stream() {},
         async wait() {

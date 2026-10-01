@@ -12,7 +12,7 @@ LOG_FILE="$LOG_DIR/gateway.log"
 ERR_FILE="$LOG_DIR/gateway.err.log"
 LABEL="com.toms.gateway"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-SERVICE_PATH="$GATEWAY_ROOT/app/node_modules/.bin:$GATEWAY_ROOT/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+SERVICE_PATH="$HOME/.local/bin:$GATEWAY_ROOT/app/node_modules/.bin:$GATEWAY_ROOT/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 gateway_setting() {
   local name="$1" fallback="$2" value=""

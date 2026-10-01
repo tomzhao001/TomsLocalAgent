@@ -44,7 +44,8 @@ function Initialize-GatewayEnvironment {
   $bins = @(
     (Join-Path $GatewayRoot "app\node_modules\opencode-ai\bin"),
     (Join-Path $GatewayRoot "app\node_modules\.bin"),
-    (Join-Path $GatewayRoot "node")
+    (Join-Path $GatewayRoot "node"),
+    (Join-Path $env:LOCALAPPDATA "cursor-agent")
   )
   $env:PATH = ($bins -join ";") + ";" + $env:PATH
 }

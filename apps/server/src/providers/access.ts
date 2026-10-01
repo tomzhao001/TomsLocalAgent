@@ -49,8 +49,19 @@ export const cursorAccess: Record<AccessProfile, CursorAccess> = {
 };
 
 export function withRules(profile: AccessProfile, prompt: string): string {
-  const rules = cursorAccess[profile].rules;
-  return rules ? `${rules}\n\n${prompt}` : prompt;
+  return promptWithRules(cursorAccess[profile], prompt);
+}
+
+export function accessForChat(mode: "ask" | "plan" | "agent" | undefined): CursorAccess {
+  if (mode === "agent") return { mode: "agent", rules: "" };
+  if (mode === "plan" || mode === "ask") {
+    return { mode: "plan", tools: [...readTools, "webSearch", "webFetch"], rules: "" };
+  }
+  return cursorAccess.chat;
+}
+
+export function promptWithRules(access: CursorAccess, prompt: string): string {
+  return access.rules ? `${access.rules}\n\n${prompt}` : prompt;
 }
 
 export const opencodeReadonly = {

@@ -1,6 +1,7 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { GatewayEvent } from "@gateway/shared";
-import { createAcpRuntime, permissionChoice, routeCursorRuntime, type AcpIncoming, type AcpLink } from "../src/providers/acp.js";
+import { agentCandidates, createAcpRuntime, permissionChoice, routeCursorRuntime, type AcpIncoming, type AcpLink } from "../src/providers/acp.js";
 import { mergeTodos } from "../src/providers/plan-doc.js";
 import type { AgentRuntime } from "../src/runs.js";
 const session = {
@@ -227,6 +228,86 @@ describe("ACP 计划与权限", () => {
     expect(result.status).toBe("finished");
     expect(link.calls[1]?.params).toMatchObject({ modeId: "agent" });
     expect(link.replies[0]).toEqual({ id: 9, result: { outcome: { outcome: "selected", optionId: "allow-once" } } });
+  });
+
+  it("同一会话从 Plan 切到 Agent 时放行写入", async () => {
+    const both = {
+      ...session,
+      modes: {
+        currentModeId: "plan",
+        availableModes: [
+          { id: "agent", name: "Agent" },
+          { id: "ask", name: "Ask" },
+          { id: "plan", name: "Plan" },
+        ],
+      },
+    };
+    const link = scripted((method, _params, peer) => {
+      if (method === "session/new" || method === "session/load") return both;
+      if (method === "session/prompt") {
+        peer.emit({
+          id: 9,
+          method: "session/request_permission",
+          params: {
+            sessionId: "sess-1",
+            toolCall: { kind: "execute", title: "shell" },
+            options: [
+              { optionId: "allow-once", kind: "allow_once" },
+              { optionId: "reject-once", kind: "reject_once" },
+            ],
+          },
+        });
+        return { stopReason: "end_turn" };
+      }
+      return {};
+    });
+    const runtime = createAcpRuntime(async () => link);
+    const base = { sessionId: "s", runId: "r", workspaceId: "w", prompt: "改一下", model: "auto", cwd: "/", access: "chat" as const };
+    const first = await collect(runtime, { ...base, chatMode: "plan", agentId: null });
+    expect(first.status).toBe("finished");
+    expect(link.calls.find((call) => call.method === "session/set_mode")?.params).toMatchObject({ modeId: "plan" });
+    expect(link.replies[0]).toEqual({ id: 9, result: { outcome: { outcome: "selected", optionId: "reject-once" } } });
+    link.calls.length = 0;
+    link.replies.length = 0;
+    const second = await collect(runtime, { ...base, chatMode: "agent", agentId: "sess-1" });
+    expect(second.status).toBe("finished");
+    expect(link.calls[0]?.method).toBe("session/load");
+    expect(link.calls.find((call) => call.method === "session/set_mode")?.params).toMatchObject({ modeId: "agent" });
+    expect(link.replies[0]).toEqual({ id: 9, result: { outcome: { outcome: "selected", optionId: "allow-once" } } });
+  });
+
+  it("加载旧会话失败时新建 ACP 会话", async () => {
+    const link = scripted((method) => {
+      if (method === "session/load") throw new Error("会话不存在");
+      if (method === "session/new") return session;
+      return {};
+    });
+    const runtime = createAcpRuntime(async () => link);
+    const saved: string[] = [];
+    const result = await collect(runtime, {
+      sessionId: "s",
+      runId: "r",
+      workspaceId: "w",
+      prompt: "继续",
+      model: "auto",
+      cwd: "/",
+      access: "chat",
+      chatMode: "ask",
+      agentId: "agent-old",
+      onAgent: (id) => saved.push(id),
+    });
+    expect(result.status).toBe("finished");
+    expect(link.calls.map((call) => call.method).slice(0, 2)).toEqual(["session/load", "session/new"]);
+    expect(saved).toEqual(["sess-1"]);
+  });
+
+  it("按系统查找 agent 可执行文件", () => {
+    expect(agentCandidates("win32", { LOCALAPPDATA: "C:\\Users\\tom\\AppData\\Local" }, "C:\\Users\\tom")).toEqual([
+      "agent",
+      join("C:\\Users\\tom\\AppData\\Local", "cursor-agent", "agent.cmd"),
+    ]);
+    expect(agentCandidates("darwin", {}, "/Users/tom")).toEqual(["agent", join("/Users/tom", ".local", "bin", "agent")]);
+    expect(agentCandidates("darwin", { CURSOR_AGENT_BIN: "/opt/agent" }, "/Users/tom")[0]).toBe("/opt/agent");
   });
 
   it("没有模式声明时直接报错，不调用 set_mode", async () => {

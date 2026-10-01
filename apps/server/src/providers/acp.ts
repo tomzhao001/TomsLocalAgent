@@ -1,6 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import type { GatewayEvent, PlanDocument } from "@gateway/shared";
 import type { AgentRuntime, RunContext, RunTerminal } from "../runs.js";
 import { toolDetail } from "./map.js";
@@ -87,10 +88,45 @@ export function createAcpRuntime(open: () => Promise<AcpLink>): AgentRuntime & {
   return runtime;
 }
 
-export async function openCursorAcp(options: { bin: string; apiKey: string }): Promise<{ runtime: AgentRuntime; close: () => void } | null> {
-  if (!(await probeAgent(options.bin))) return null;
-  const runtime = createAcpRuntime(() => spawnAcpLink(options.bin, options.apiKey));
-  return { runtime, close: () => runtime.close() };
+const probeTimeoutMs = 15_000;
+
+export function agentCandidates(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  home = homedir(),
+): string[] {
+  const found: string[] = [];
+  const push = (value?: string) => {
+    const trimmed = value?.trim();
+    if (trimmed && !found.includes(trimmed)) found.push(trimmed);
+  };
+  push(env.CURSOR_AGENT_BIN);
+  push("agent");
+  if (platform === "win32") {
+    push(join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "cursor-agent", "agent.cmd"));
+  } else {
+    push(join(home, ".local", "bin", "agent"));
+  }
+  return found;
+}
+
+export async function openCursorAcp(options: {
+  apiKey: string;
+  bins?: string[];
+}): Promise<{ runtime: AgentRuntime; close: () => void } | null> {
+  const bins = options.bins ?? agentCandidates();
+  const reasons: string[] = [];
+  for (const bin of bins) {
+    const probed = await probeAgent(bin);
+    if (probed.ok) {
+      console.log(`Cursor ACP 已接上：${bin}`);
+      const runtime = createAcpRuntime(() => spawnAcpLink(bin, options.apiKey));
+      return { runtime, close: () => runtime.close() };
+    }
+    reasons.push(`${bin}：${probed.reason}`);
+  }
+  console.error(`Cursor ACP 不可用，聊天回退 SDK。${reasons.join("；")}`);
+  return null;
 }
 
 export function routeCursorRuntime(workflow: AgentRuntime, chat: AgentRuntime | null): AgentRuntime {
@@ -104,34 +140,45 @@ export function routeCursorRuntime(workflow: AgentRuntime, chat: AgentRuntime | 
   };
 }
 
-export function probeAgent(bin: string, timeoutMs = 5000): Promise<boolean> {
+export function probeAgent(bin: string, timeoutMs = probeTimeoutMs): Promise<{ ok: true } | { ok: false; reason: string }> {
   return new Promise((resolveProbe) => {
-    let spawned = false;
-    const child = spawn(bin, ["--version"], { windowsHide: true, stdio: "ignore" });
+    let settled = false;
+    const finish = (result: { ok: true } | { ok: false; reason: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveProbe(result);
+    };
+    let child: ChildProcess;
+    try {
+      child = spawnAgent(bin, ["--version"], "ignore");
+    } catch (error) {
+      resolveProbe({ ok: false, reason: error instanceof Error ? error.message : "无法启动" });
+      return;
+    }
     const timer = setTimeout(() => {
       child.kill();
-      resolveProbe(false);
+      finish({ ok: false, reason: "探测超时" });
     }, timeoutMs);
-    child.on("spawn", () => {
-      spawned = true;
-    });
-    child.on("error", () => {
-      clearTimeout(timer);
-      resolveProbe(false);
-    });
-    child.on("exit", () => {
-      clearTimeout(timer);
-      resolveProbe(spawned);
-    });
+    child.on("error", (error) => finish({ ok: false, reason: error.message }));
+    child.on("exit", (code) => finish(code === 0 ? { ok: true } : { ok: false, reason: `退出码 ${code ?? "无"}` }));
+  });
+}
+
+function spawnAgent(bin: string, args: string[], stdio: "ignore" | ["pipe", "pipe", "pipe"], env?: NodeJS.ProcessEnv) {
+  return spawn(bin, args, {
+    windowsHide: true,
+    shell: process.platform === "win32",
+    stdio,
+    env,
   });
 }
 
 async function spawnAcpLink(bin: string, apiKey: string): Promise<AcpLink> {
-  const child = spawn(bin, ["--api-key", apiKey, "acp"], {
-    windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, CURSOR_API_KEY: apiKey },
-  });
+  const child = spawnAgent(bin, ["--api-key", apiKey, "acp"], ["pipe", "pipe", "pipe"], {
+    ...process.env,
+    CURSOR_API_KEY: apiKey,
+  }) as ChildProcessWithoutNullStreams;
   const link = new ProcessLink(child);
   await link.request("initialize", {
     protocolVersion: 1,
@@ -235,9 +282,18 @@ async function runTurn(
 
   try {
     if (signal?.aborted) return "cancelled";
-    const opened = input.agentId
-      ? await current.request("session/load", { sessionId: input.agentId, cwd, mcpServers: [] })
-      : await current.request("session/new", { cwd, mcpServers: [] });
+    let opened: unknown = null;
+    if (input.agentId) {
+      try {
+        opened = await current.request("session/load", { sessionId: input.agentId, cwd, mcpServers: [] });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (message.includes("ACP 进程已退出")) throw error;
+        opened = null;
+      }
+      if (!stringOf(asRecord(opened).sessionId)) opened = null;
+    }
+    if (!opened) opened = await current.request("session/new", { cwd, mcpServers: [] });
     const session = asRecord(opened);
     sessionId = stringOf(session.sessionId) ?? "";
     if (!sessionId) {
