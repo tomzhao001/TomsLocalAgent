@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { stepLabels, type StepId, type StepRun } from "@/lib/api";
+import type { StepRun } from "@/lib/api";
 import { LogView } from "./LogView";
 
 const runStatusLabels: Record<StepRun["status"], string> = {
@@ -12,7 +12,7 @@ const runStatusLabels: Record<StepRun["status"], string> = {
   interrupted: "中断",
 };
 
-export function StepLogPanel({ step, runs }: { step: StepId; runs: StepRun[] }) {
+export function StepLogPanel({ runs }: { runs: StepRun[] }) {
   const [selected, setSelected] = useState<string | null>(runs.at(-1)?.id ?? null);
 
   useEffect(() => {
@@ -22,9 +22,8 @@ export function StepLogPanel({ step, runs }: { step: StepId; runs: StepRun[] }) 
   const run = runs.find((item) => item.id === selected);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border p-3">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <strong className="text-sm">{stepLabels[step]} 日志</strong>
         {runs.map((item) => (
           <Button
             key={item.id}
@@ -52,7 +51,7 @@ export function StepLogPanel({ step, runs }: { step: StepId; runs: StepRun[] }) 
                 : `${run.result.verdict === "pass" ? "通过" : "不通过"}${run.result.comments ? `：${run.result.comments}` : ""}`}
             </p>
           ) : null}
-          <LogView url={`/api/step-runs/${run.id}/log`} running={run.status === "running"} />
+          <LogView url={`/api/step-runs/${run.id}/log`} running={run.status === "running"} scroll={false} />
         </>
       ) : null}
     </div>

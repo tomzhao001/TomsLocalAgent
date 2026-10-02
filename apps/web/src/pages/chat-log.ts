@@ -5,6 +5,7 @@ export type ChatBubble =
   | { role: "thinking"; text: string }
   | { role: "tool"; callId: string; name: string; detail?: string; running: boolean }
   | { role: "plan"; plan: PlanDocument }
+  | { role: "done"; status: string }
   | { role: "end"; runId: string; finished: boolean; violation: boolean };
 
 const todoLabels: Record<PlanTodo["status"], string> = {
@@ -26,6 +27,7 @@ export function appendLogEvent(bubbles: ChatBubble[], event: LogEvent): ChatBubb
   if (event.type === "error") return [...bubbles, { role: "error", text: event.message }];
   if (event.type === "plan") return [...bubbles, { role: "plan", plan: event.plan }];
   if (event.type === "todos") return applyTodos(bubbles, event.todos);
+  if (event.type === "done") return [...bubbles, { role: "done", status: event.status }];
   return bubbles;
 }
 

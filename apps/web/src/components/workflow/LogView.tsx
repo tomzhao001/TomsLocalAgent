@@ -4,13 +4,15 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api, type LogEvent } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
+import { appendLogEvent, type ChatBubble } from "@/pages/chat-log";
 
-export function LogView({ url, running }: { url: string; running: boolean }) {
+export function LogView({ url, running, scroll = true }: { url: string; running: boolean; scroll?: boolean }) {
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const offset = useRef(0);
   const seq = useRef(0);
+  const bubbles = events.reduce(appendLogEvent, [] as ChatBubble[]);
 
   const load = useCallback(async () => {
     const current = seq.current;
@@ -37,6 +39,16 @@ export function LogView({ url, running }: { url: string; running: boolean }) {
 
   usePolling(load, 10_000, running);
 
+  const body = (
+    <div className={`flex flex-col gap-2 text-xs leading-5 ${scroll ? "p-3" : ""}`}>
+      {bubbles.length === 0 ? <p className="text-muted-foreground">暂无日志</p> : null}
+      {bubbles.map((bubble, index) => (
+        <LogBubble key={index} bubble={bubble} />
+      ))}
+      {error ? <p className="text-destructive">{error}</p> : null}
+    </div>
+  );
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -45,35 +57,40 @@ export function LogView({ url, running }: { url: string; running: boolean }) {
           <RefreshCw />
         </Button>
       </div>
-      <ScrollArea className="max-h-80 rounded-lg border">
-        <div className="flex flex-col gap-2 p-3 text-xs leading-5">
-          {events.length === 0 ? <p className="text-muted-foreground">暂无日志</p> : null}
-          {events.map((event, index) => (
-            <LogLine key={index} event={event} />
-          ))}
-          {error ? <p className="text-destructive">{error}</p> : null}
-        </div>
-      </ScrollArea>
+      {scroll ? <ScrollArea className="max-h-80 rounded-lg border">{body}</ScrollArea> : body}
     </div>
   );
 }
 
-function LogLine({ event }: { event: LogEvent }) {
-  if (event.type === "text") return <p className="whitespace-pre-wrap">{event.text}</p>;
-  if (event.type === "thinking") {
+function LogBubble({ bubble }: { bubble: ChatBubble }) {
+  if (bubble.role === "thinking") {
     return (
       <details className="text-muted-foreground">
         <summary className="cursor-pointer">思考</summary>
-        <p className="whitespace-pre-wrap">{event.text}</p>
+        <p className="whitespace-pre-wrap">{bubble.text}</p>
       </details>
     );
   }
-  if (event.type === "tool-start") return <p className="font-mono text-muted-foreground">→ {toolLine(event.name, event.detail)}</p>;
-  if (event.type === "tool-end") return <p className="font-mono text-muted-foreground">✓ {toolLine(event.name, event.detail)}</p>;
-  if (event.type === "plan") return <p className="text-muted-foreground">计划：{event.plan.name || event.plan.overview || "已生成"}</p>;
-  if (event.type === "todos") return <p className="text-muted-foreground">待办 {event.todos.length} 项</p>;
-  if (event.type === "error") return <p className="text-destructive">{event.message}</p>;
-  if (event.type === "done") return <p className="text-muted-foreground">结束：{event.status}</p>;
+  if (bubble.role === "tool") {
+    return (
+      <p className="font-mono text-muted-foreground">
+        {bubble.running ? "→" : "✓"} {toolLine(bubble.name, bubble.detail)}
+      </p>
+    );
+  }
+  if (bubble.role === "plan") {
+    const name = bubble.plan.name || bubble.plan.overview || "已生成";
+    const todos = bubble.plan.todos.length ? ` · 待办 ${bubble.plan.todos.length} 项` : "";
+    return (
+      <p className="text-muted-foreground">
+        计划：{name}
+        {todos}
+      </p>
+    );
+  }
+  if (bubble.role === "error") return <p className="whitespace-pre-wrap text-destructive">{bubble.text}</p>;
+  if (bubble.role === "done") return <p className="text-muted-foreground">结束：{bubble.status}</p>;
+  if (bubble.role === "assistant" || bubble.role === "user") return <p className="whitespace-pre-wrap">{bubble.text}</p>;
   return null;
 }
 

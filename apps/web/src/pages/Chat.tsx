@@ -384,7 +384,7 @@ export function ChatPage({
                     </summary>
                     {bubble.detail ? <p className="whitespace-pre-wrap">{bubble.detail}</p> : null}
                   </details>
-                ) : (
+                ) : bubble.role === "done" ? null : (
                   <p
                     key={index}
                     className={

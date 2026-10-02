@@ -32,4 +32,15 @@ describe("聊天日志折叠", () => {
     expect(bubbles[2]).toMatchObject({ running: false, detail: "a.ts" });
     expect(bubbles[3]).toMatchObject({ text: "看完" });
   });
+
+  it("结束事件单独成一条，不并进正文", () => {
+    const bubbles = [
+      { type: "text" as const, text: "好" },
+      { type: "done" as const, status: "finished" },
+    ].reduce(appendLogEvent, []);
+    expect(bubbles).toEqual([
+      { role: "assistant", text: "好" },
+      { role: "done", status: "finished" },
+    ]);
+  });
 });

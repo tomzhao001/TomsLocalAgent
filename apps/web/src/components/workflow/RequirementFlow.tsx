@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from "react";
 import { Handle, Position, ReactFlow, type BuiltInEdge, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { rejectLimits, stepLabels, workflowSteps, type Requirement, type StepId } from "@/lib/api";
@@ -69,6 +70,15 @@ const nodeTypes = { step: StepNode };
 
 const baseHeight = 56;
 const gap = 44;
+const nodeWidth = 256;
+const loopExtra = 88 + 96;
+const zoomCap = 0.92;
+
+function fitZoom(available: number, loop: boolean): number {
+  if (!available) return zoomCap;
+  const contentWidth = nodeWidth + (loop ? loopExtra : 16);
+  return Math.min(zoomCap, available / contentWidth);
+}
 
 export function RequirementFlow(props: {
   requirement: Requirement;
@@ -76,6 +86,9 @@ export function RequirementFlow(props: {
   onSelect: (step: StepId) => void;
 }) {
   const { requirement } = props;
+  const frame = useRef<HTMLDivElement>(null);
+  const loop = requirement.workflowId !== "cursor-qa";
+  const [zoom, setZoom] = useState(zoomCap);
   const steps = workflowSteps[requirement.workflowId] ?? workflowSteps["cursor-dev-loop"];
   let y = 0;
   const nodes: StepFlowNode[] = steps.map((step) => {
@@ -94,6 +107,23 @@ export function RequirementFlow(props: {
     y += baseHeight + gap;
     return node;
   });
+
+  useLayoutEffect(() => {
+    const el = frame.current;
+    if (!el) return;
+    let width = 0;
+    const apply = () => {
+      const nextWidth = el.clientWidth;
+      if (!nextWidth || (width && Math.abs(nextWidth - width) < 24)) return;
+      width = nextWidth;
+      setZoom(Number(fitZoom(nextWidth, loop).toFixed(3)));
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loop]);
+
   const overReview = requirement.reviewRejects > rejectLimits.review;
   const edges: (Edge | BuiltInEdge)[] =
     requirement.workflowId === "cursor-qa"
@@ -117,19 +147,20 @@ export function RequirementFlow(props: {
         ];
 
   return (
-    <div className="w-full" style={{ height: y + 24 }}>
+    <div ref={frame} className="w-full" style={{ height: (y + 24) * zoom }}>
       <ReactFlow
-        key={y}
+        key={`${y}-${zoom}`}
         colorMode="light"
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-        minZoom={1}
-        maxZoom={1}
+        defaultViewport={{ x: 0, y: 0, zoom }}
+        minZoom={zoom}
+        maxZoom={zoom}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
+        panOnDrag={false}
         zoomOnScroll={false}
         zoomOnPinch={false}
         zoomOnDoubleClick={false}

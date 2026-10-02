@@ -131,6 +131,11 @@
     }
 }
 
+.react-flow,
+.react-flow__pane {
+  touch-action: pan-y;
+}
+
 .react-flow svg {
   max-width: none;
 }
