@@ -12,8 +12,25 @@ export type AcpIncoming = {
   method?: string;
   params?: unknown;
   result?: unknown;
-  error?: { message?: string };
+  error?: { message?: string; data?: unknown };
 };
+
+export const acpInitializeParams = {
+  protocolVersion: 1,
+  clientCapabilities: {
+    fs: { readTextFile: false, writeTextFile: false },
+    terminal: false,
+    _meta: { parameterizedModelPicker: true },
+  },
+  clientInfo: { name: "toms-gateway", version: "0.0.1" },
+};
+
+export function acpErrorText(error: { message?: string; data?: unknown } | undefined): string {
+  const message = error?.message || "ACP 请求失败";
+  const detail = stringOf(asRecord(error?.data).message);
+  if (detail && detail !== message) return `${message}：${detail}`;
+  return message;
+}
 
 export type AcpLink = {
   request(method: string, params: unknown): Promise<unknown>;
@@ -180,11 +197,7 @@ async function spawnAcpLink(bin: string, apiKey: string): Promise<AcpLink> {
     CURSOR_API_KEY: apiKey,
   }) as ChildProcessWithoutNullStreams;
   const link = new ProcessLink(child);
-  await link.request("initialize", {
-    protocolVersion: 1,
-    clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-    clientInfo: { name: "toms-gateway", version: "0.0.1" },
-  });
+  await link.request("initialize", acpInitializeParams);
   await link.request("authenticate", { methodId: "cursor_login" });
   return link;
 }
@@ -313,18 +326,23 @@ async function runTurn(
     }
     await current.request("session/set_mode", { sessionId, modeId: mode });
 
-    const modelOption = modelConfig(session.configOptions);
+    let options: unknown = session.configOptions;
+    let modelOption = modelConfig(options);
     if (!modelOption) {
       emit({ type: "error", message: "ACP 没有声明模型切换" });
       return "error";
     }
     if (input.model && modelOption.currentValue !== input.model) {
-      await current.request("session/set_config_option", { sessionId, configId: modelOption.id, value: input.model });
+      const updated = await current.request("session/set_config_option", { sessionId, configId: modelOption.id, value: input.model });
+      options = configOptionsFrom(updated) ?? options;
+      modelOption = modelConfig(options) ?? modelOption;
     }
     for (const param of input.modelParams ?? []) {
-      const option = configById(session.configOptions).get(param.id);
+      const option = configById(options).get(param.id);
       if (!option || option.id === modelOption.id || option.currentValue === param.value) continue;
-      await current.request("session/set_config_option", { sessionId, configId: option.id, value: param.value });
+      const updated = await current.request("session/set_config_option", { sessionId, configId: option.id, value: param.value });
+      options = configOptionsFrom(updated) ?? options;
+      modelOption = modelConfig(options) ?? modelOption;
     }
 
     const result = await current.request("session/prompt", {
@@ -401,7 +419,7 @@ class ProcessLink implements AcpLink {
         const waiter = this.pending.get(Number(message.id));
         if (!waiter) return;
         this.pending.delete(Number(message.id));
-        if (message.error) waiter.reject(new Error(message.error.message || "ACP 请求失败"));
+        if (message.error) waiter.reject(new Error(acpErrorText(message.error)));
         else waiter.resolve(message.result);
         return;
       }
@@ -466,6 +484,11 @@ function availableModes(value: unknown): string[] | null {
     return id ? [id] : [];
   });
   return ids.length ? ids : null;
+}
+
+function configOptionsFrom(value: unknown): unknown[] | undefined {
+  const options = asRecord(value).configOptions;
+  return Array.isArray(options) ? options : undefined;
 }
 
 function configById(value: unknown): Map<string, { id: string; currentValue?: string }> {

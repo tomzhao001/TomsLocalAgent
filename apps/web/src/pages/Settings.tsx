@@ -1,10 +1,20 @@
-import { ChevronDown } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
+import { ModelDialog } from "@/components/ModelDialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  canonicalStoredModel,
+  defaultModelParams,
+  formatVariantId,
+  modelSummary,
+  parseVariantId,
+  type ModelInfo,
+  type ModelParam,
+} from "./model-choice";
 
 type Workspace = {
   id: string;
@@ -16,8 +26,6 @@ type Workspace = {
   developModel?: string;
   reviewModel?: string;
 };
-
-type ModelInfo = { id: string; label: string };
 
 export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   const [items, setItems] = useState<Workspace[]>([]);
@@ -218,10 +226,10 @@ function ModelFields({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setChatModel(item.chatModel ?? "");
-    setDevelopModel(item.developModel ?? "");
-    setReviewModel(item.reviewModel ?? "");
-  }, [item.chatModel, item.developModel, item.reviewModel]);
+    setChatModel(canonicalStoredModel(models, item.chatModel ?? ""));
+    setDevelopModel(canonicalStoredModel(models, item.developModel ?? ""));
+    setReviewModel(canonicalStoredModel(models, item.reviewModel ?? ""));
+  }, [item.chatModel, item.developModel, item.reviewModel, models]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -244,22 +252,10 @@ function ModelFields({
 
   return (
     <form className="grid gap-3 sm:grid-cols-3" onSubmit={(event) => void save(event)}>
-      <ModelSelect id={`${item.id}-chat-model`} label="聊天默认模型" value={chatModel} models={models} onChange={setChatModel} />
-      <ModelSelect
-        id={`${item.id}-develop-model`}
-        label="工作流开发默认模型"
-        value={developModel}
-        models={models}
-        onChange={setDevelopModel}
-      />
+      <ModelField label="聊天默认模型" value={chatModel} models={models} onChange={setChatModel} />
+      <ModelField label="工作流开发默认模型" value={developModel} models={models} onChange={setDevelopModel} />
       <div className="grid gap-2 sm:col-span-2 sm:grid-cols-[1fr_auto] sm:items-end">
-        <ModelSelect
-          id={`${item.id}-review-model`}
-          label="工作流 Review 默认模型"
-          value={reviewModel}
-          models={models}
-          onChange={setReviewModel}
-        />
+        <ModelField label="工作流 Review 默认模型" value={reviewModel} models={models} onChange={setReviewModel} />
         <Button type="submit" size="sm" variant="outline" disabled={saving}>
           保存模型
         </Button>
@@ -268,61 +264,69 @@ function ModelFields({
   );
 }
 
-function ModelSelect({
-  id,
+function ModelField({
   label,
   value,
   models,
   onChange,
 }: {
-  id: string;
   label: string;
   value: string;
   models: ModelInfo[];
   onChange: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [draftId, setDraftId] = useState("");
+  const [draftParams, setDraftParams] = useState<ModelParam[]>([]);
+  const parsed = parseVariantId(value);
+  const selected = models.find((item) => item.id === parsed.id);
+  const summary = value
+    ? modelSummary(selected, parsed.params.length ? parsed.params : defaultModelParams(selected))
+    : "沿用环境变量";
+
+  function openDialog() {
+    const model = selected ?? models[0];
+    if (!model) return;
+    setDraftId(model.id);
+    setDraftParams(parsed.id === model.id && parsed.params.length ? parsed.params : defaultModelParams(model));
+    setOpen(true);
+  }
+
   return (
     <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <div className="relative flex gap-1">
-        <Input
-          id={id}
-          className="min-w-0 flex-1"
-          value={value}
-          placeholder="留空则沿用环境变量"
-          onChange={(event) => onChange(event.target.value)}
-        />
+      <Label>{label}</Label>
+      <div className="flex gap-1">
         <Button
           type="button"
-          size="icon"
           variant="outline"
-          aria-label={`${label}候选`}
-          aria-expanded={open}
+          className="min-w-0 flex-1 justify-start"
+          aria-label={label}
           disabled={models.length === 0}
-          onClick={() => setOpen((current) => !current)}
+          onClick={openDialog}
         >
-          <ChevronDown />
+          <span className="truncate">{!value || selected ? summary : parsed.id}</span>
         </Button>
-        {open ? (
-          <ul className="absolute top-full right-0 z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md">
-            {models.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
-                  onClick={() => {
-                    onChange(item.id);
-                    setOpen(false);
-                  }}
-                >
-                  {item.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        <Button type="button" size="icon" variant="ghost" aria-label={`清空${label}`} disabled={!value} onClick={() => onChange("")}>
+          <X />
+        </Button>
       </div>
+      <ModelDialog
+        open={open}
+        models={models}
+        draftId={draftId}
+        draftParams={draftParams}
+        title={label}
+        onOpenChange={setOpen}
+        onModel={(id) => {
+          setDraftId(id);
+          setDraftParams(defaultModelParams(models.find((item) => item.id === id)));
+        }}
+        onParams={setDraftParams}
+        onApply={() => {
+          onChange(formatVariantId(draftId, draftParams));
+          setOpen(false);
+        }}
+      />
     </div>
   );
 }

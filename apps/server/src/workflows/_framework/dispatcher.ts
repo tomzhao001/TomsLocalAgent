@@ -5,7 +5,7 @@ import { dbOpen } from "../../db.js";
 import { appendLog } from "../../logs.js";
 import type { WorkspaceLockManager } from "../../locks.js";
 import type { AccessProfile } from "../../providers/access.js";
-import { traceFromEvent, type StepTrace } from "../../providers/map.js";
+import { resolveStoredModel, traceFromEvent, type StepTrace } from "../../providers/map.js";
 import type { AgentRuntime } from "../../runs.js";
 import { scanGitRepos } from "../../paths.js";
 import { collectReviewDiff } from "../cursor-dev-loop/diff.js";
@@ -301,13 +301,23 @@ export class Dispatcher {
                 firstTurn: action.nodeId === "review" || action.nodeId === "plan" || !row.agent_id,
                 diff,
               });
+        const storedModel = this.modelFor(action.nodeId, workspace);
+        let selection = resolveStoredModel([], storedModel);
+        if (runtime.listModels) {
+          try {
+            selection = resolveStoredModel(await runtime.listModels(), storedModel);
+          } catch {
+            selection = resolveStoredModel([], storedModel);
+          }
+        }
         const terminal = await runtime.startRun(
           {
             sessionId: `req:${row.id}`,
             runId: stepRunId,
             workspaceId: row.workspace_id,
             prompt,
-            model: this.modelFor(action.nodeId, workspace),
+            model: selection.id,
+            ...(selection.params ? { modelParams: selection.params } : {}),
             cwd: workspace.path,
             access: stepAccess[action.nodeId],
             agentId: keepAgent ? row.agent_id : null,

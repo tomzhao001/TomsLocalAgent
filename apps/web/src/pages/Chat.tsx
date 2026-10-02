@@ -3,8 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type Reac
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ModelDialog } from "@/components/ModelDialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { SplitDialog } from "@/components/workflow/SplitDialog";
@@ -12,8 +12,9 @@ import { readonlyViolation, type LogEvent, type PlanDocument, type PlanTodo } fr
 import { appendLogEvent, todoLabel, type ChatBubble } from "./chat-log";
 import {
   defaultModelParams,
+  matchVariant,
   modelSummary,
-  normalizeModelParams,
+  parseVariantId,
   pickModelId,
   type ModelInfo,
   type ModelParam,
@@ -145,10 +146,11 @@ export function ChatPage({
       })
       .catch((reason: unknown) => {
         if (cancelled) return;
-        const listed = chatModel ? [{ id: chatModel, label: chatModel }] : [];
+        const storedId = parseVariantId(chatModel).id;
+        const listed = storedId ? [{ id: storedId, label: storedId }] : [];
         setModels(listed);
         setSelection(chooseSelection(listed, { id: "", params: [] }, chatModel));
-        if (!chatModel) setModelError(reason instanceof Error ? reason.message : "模型列表读取失败");
+        if (!storedId) setModelError(reason instanceof Error ? reason.message : "模型列表读取失败");
       });
     return () => {
       cancelled = true;
@@ -476,9 +478,7 @@ export function ChatPage({
               setDraftId(id);
               setDraftParams(defaultModelParams(models.find((item) => item.id === id)));
             }}
-            onParam={(id, value) => {
-              setDraftParams((current) => current.map((item) => (item.id === id ? { id, value } : item)));
-            }}
+            onParams={setDraftParams}
             onApply={() => {
               setSelection({ id: draftId, params: draftParams });
               setModelOpen(false);
@@ -564,91 +564,23 @@ function ChatToolbar({
 }
 
 function withChatModel(items: ModelInfo[], chatModel: string): ModelInfo[] {
-  if (!chatModel || items.some((item) => item.id === chatModel)) return items;
-  return [{ id: chatModel, label: chatModel }, ...items];
+  const id = parseVariantId(chatModel).id;
+  if (!id || items.some((item) => item.id === id)) return items;
+  return [{ id, label: id }, ...items];
 }
 
 function chooseSelection(listed: ModelInfo[], current: { id: string; params: ModelParam[] }, chatModel: string) {
   const id = pickModelId(listed, current.id, chatModel);
   const model = listed.find((item) => item.id === id);
-  const params = current.id === id ? normalizeModelParams(model, current.params) : defaultModelParams(model);
-  return { id, params };
+  if (current.id === id) return { id, params: paramsFor(model, current.params) };
+  const stored = parseVariantId(chatModel);
+  if (stored.id === id && stored.params.length) return { id, params: paramsFor(model, stored.params) };
+  return { id, params: defaultModelParams(model) };
 }
 
-function ModelDialog({
-  open,
-  models,
-  draftId,
-  draftParams,
-  onOpenChange,
-  onModel,
-  onParam,
-  onApply,
-}: {
-  open: boolean;
-  models: ModelInfo[];
-  draftId: string;
-  draftParams: ModelParam[];
-  onOpenChange: (open: boolean) => void;
-  onModel: (id: string) => void;
-  onParam: (id: string, value: string) => void;
-  onApply: () => void;
-}) {
-  const selected = models.find((item) => item.id === draftId);
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>模型</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-2">
-            <Label>模型</Label>
-            <Select value={draftId} onValueChange={(value) => { if (value) onModel(value); }}>
-              <SelectTrigger aria-label="选择模型">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {models.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {(selected?.parameters ?? []).map((param) => (
-            <div key={param.id} className="grid gap-2">
-              <Label>{param.label}</Label>
-              <Select
-                value={draftParams.find((item) => item.id === param.id)?.value ?? ""}
-                onValueChange={(value) => { if (value) onParam(param.id, value); }}
-              >
-                <SelectTrigger aria-label={param.label}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {param.values.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ))}
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button type="button" onClick={onApply}>
-            确定
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+function paramsFor(model: ModelInfo | undefined, params: ModelParam[]): ModelParam[] {
+  if (!model?.parameters?.length) return params;
+  return matchVariant(model, params);
 }
 
 function PlanCard({ plan }: { plan: PlanDocument }) {

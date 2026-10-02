@@ -12,7 +12,7 @@ import {
   type CursorSendOptions,
 } from "../src/providers/cursor.js";
 import { createOpenCodeRuntime } from "../src/providers/opencode.js";
-import { cachedModels, classifyCursorFailure, flattenOpenCodeModels, mapCursorEvent, mapCursorModels, takeOpencodePart } from "../src/providers/map.js";
+import { cachedModels, classifyCursorFailure, flattenOpenCodeModels, formatVariantId, mapCursorEvent, mapCursorModels, matchVariant, parseVariantId, resolveStoredModel, takeOpencodePart } from "../src/providers/map.js";
 import type { AgentRuntime } from "../src/runs.js";
 
 describe("SDK 事件映射", () => {
@@ -78,6 +78,48 @@ describe("SDK 事件映射", () => {
       { id: "auto", label: "Auto" },
     ]);
     expect(mapCursorModels(null)).toEqual([]);
+  });
+
+  it("变体字符串和裸 id 都能回到真实组合", () => {
+    const model = {
+      id: "grok-4.7",
+      label: "Grok 4.7",
+      parameters: [
+        { id: "context", label: "上下文", values: [{ value: "256k", label: "256k" }, { value: "500k", label: "500k" }] },
+        { id: "reasoning_effort", label: "推理", values: [{ value: "low", label: "low" }, { value: "high", label: "high" }] },
+        { id: "fast", label: "fast", values: [{ value: "false", label: "标准" }, { value: "true", label: "Fast" }] },
+      ],
+      variants: [
+        {
+          label: "默认",
+          isDefault: true,
+          params: [
+            { id: "context", value: "500k" },
+            { id: "reasoning_effort", value: "high" },
+            { id: "fast", value: "true" },
+          ],
+        },
+        {
+          label: "短",
+          params: [
+            { id: "context", value: "256k" },
+            { id: "reasoning_effort", value: "low" },
+            { id: "fast", value: "false" },
+          ],
+        },
+      ],
+    };
+    expect(formatVariantId("grok-4.7", model.variants[0]!.params)).toBe("grok-4.7[context=500k,reasoning_effort=high,fast=true]");
+    expect(parseVariantId("grok-4.7")).toEqual({ id: "grok-4.7", params: [] });
+    expect(resolveStoredModel([model], "grok-4.7")).toEqual({
+      id: "grok-4.7",
+      params: model.variants[0]!.params,
+    });
+    expect(matchVariant(model, model.variants[0]!.params, { id: "context", value: "256k" })).toEqual(model.variants[1]!.params);
+    expect(resolveStoredModel([], "grok-4.7[context=256k,reasoning_effort=low,fast=false]")).toEqual({
+      id: "grok-4.7",
+      params: model.variants[1]!.params,
+    });
   });
 
   it("把 OpenCode provider 摊成 provider/model", () => {

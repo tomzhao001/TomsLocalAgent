@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { GatewayEvent } from "@gateway/shared";
-import { agentCandidates, createAcpRuntime, permissionChoice, routeCursorRuntime, type AcpIncoming, type AcpLink } from "../src/providers/acp.js";
+import { acpErrorText, acpInitializeParams, agentCandidates, createAcpRuntime, permissionChoice, routeCursorRuntime, type AcpIncoming, type AcpLink } from "../src/providers/acp.js";
 import { mergeTodos } from "../src/providers/plan-doc.js";
 import type { AgentRuntime } from "../src/runs.js";
 const session = {
@@ -331,7 +331,14 @@ describe("ACP 计划与权限", () => {
     expect(link.calls.map((call) => call.method)).toEqual(["session/new"]);
   });
 
-  it("模型参数写到同名配置项，已经相同或没有的项跳过", async () => {
+  it("初始化声明参数化模型选择，拒绝原因带上 data.message", () => {
+    expect(acpInitializeParams.clientCapabilities._meta.parameterizedModelPicker).toBe(true);
+    expect(acpErrorText({ message: "Invalid params", data: { message: "Invalid model value: grok-4.7" } })).toBe(
+      "Invalid params：Invalid model value: grok-4.7",
+    );
+  });
+
+  it("模型参数用切换后的配置项，已经相同或没有的项跳过", async () => {
     const configured = {
       ...session,
       modes: {
@@ -343,12 +350,20 @@ describe("ACP 计划与权限", () => {
       },
       configOptions: [
         { id: "model", category: "model", currentValue: "auto" },
-        { id: "effort", currentValue: "low" },
-        { id: "fast", currentValue: "true" },
+        { id: "temperature", currentValue: "0" },
       ],
     };
-    const link = scripted((method) => {
+    const link = scripted((method, params) => {
       if (method === "session/new") return configured;
+      if (method === "session/set_config_option" && (params as { configId?: string }).configId === "model") {
+        return {
+          configOptions: [
+            { id: "model", category: "model", currentValue: "composer" },
+            { id: "effort", currentValue: "low" },
+            { id: "fast", currentValue: "true" },
+          ],
+        };
+      }
       return {};
     });
     const runtime = createAcpRuntime(async () => link);
@@ -359,6 +374,7 @@ describe("ACP 计划与权限", () => {
       prompt: "看看",
       model: "composer",
       modelParams: [
+        { id: "temperature", value: "1" },
         { id: "effort", value: "high" },
         { id: "fast", value: "true" },
         { id: "context", value: "1m" },

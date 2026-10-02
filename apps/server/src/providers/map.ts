@@ -148,6 +148,96 @@ export function modelSelection(id: string, params?: ModelParam[]): { id: string;
   return params?.length ? { id, params } : { id };
 }
 
+export function formatVariantId(id: string, params: ModelParam[]): string {
+  const body = params.filter((param) => param.id && param.value).map((param) => `${param.id}=${param.value}`);
+  if (!id) return "";
+  return body.length ? `${id}[${body.join(",")}]` : id;
+}
+
+export function parseVariantId(stored: string): { id: string; params: ModelParam[] } {
+  const trimmed = stored.trim();
+  const open = trimmed.indexOf("[");
+  if (open <= 0 || !trimmed.endsWith("]")) return { id: trimmed, params: [] };
+  const id = trimmed.slice(0, open);
+  const body = trimmed.slice(open + 1, -1).trim();
+  if (!body) return { id, params: [] };
+  const params: ModelParam[] = [];
+  for (const part of body.split(",")) {
+    const eq = part.indexOf("=");
+    if (eq <= 0) continue;
+    const paramId = part.slice(0, eq).trim();
+    const value = part.slice(eq + 1).trim();
+    if (!paramId || !value) continue;
+    params.push({ id: paramId, value });
+  }
+  return { id, params };
+}
+
+export function matchVariant(model: ModelInfo | undefined, current: ModelParam[], changed?: ModelParam): ModelParam[] {
+  const parameters = model?.parameters ?? [];
+  if (!parameters.length) return [];
+  const desired = parameters.flatMap((param) => {
+    const value = param.id === changed?.id ? changed.value : current.find((item) => item.id === param.id)?.value;
+    if (!value || !param.values.some((item) => item.value === value)) return [];
+    return [{ id: param.id, value }];
+  });
+  const variants = model?.variants ?? [];
+  if (!variants.length) return normalizeParams(model, desired);
+
+  let pool = variants;
+  if (changed) {
+    const supporting = variants.filter((variant) =>
+      variant.params.some((item) => item.id === changed.id && item.value === changed.value),
+    );
+    if (supporting.length) pool = supporting;
+    else {
+      const defaults = variants.filter((variant) => variant.isDefault);
+      pool = defaults.length ? defaults : variants;
+    }
+  }
+  let best = pool[0];
+  let bestKept = -1;
+  for (const variant of pool) {
+    let kept = 0;
+    for (const param of desired) {
+      if (changed && param.id === changed.id) continue;
+      if (variant.params.some((item) => item.id === param.id && item.value === param.value)) kept += 1;
+    }
+    if (!best || kept > bestKept || (kept === bestKept && variant.isDefault && !best.isDefault)) {
+      best = variant;
+      bestKept = kept;
+    }
+  }
+  return parameters.flatMap((param) => {
+    const value = best?.params.find((item) => item.id === param.id)?.value;
+    return value ? [{ id: param.id, value }] : [];
+  });
+}
+
+export function resolveStoredModel(models: ModelInfo[], stored: string): { id: string; params?: ModelParam[] } {
+  const parsed = parseVariantId(stored);
+  if (!parsed.id) return { id: stored };
+  const model = models.find((item) => item.id === parsed.id);
+  if (!model?.parameters?.length) return modelSelection(parsed.id, parsed.params);
+  return modelSelection(parsed.id, matchVariant(model, parsed.params));
+}
+
+function normalizeParams(model: ModelInfo | undefined, current: ModelParam[]): ModelParam[] {
+  const parameters = model?.parameters ?? [];
+  const next = parameters.flatMap((param) => {
+    const selected = current.find((item) => item.id === param.id)?.value;
+    if (!selected || !param.values.some((item) => item.value === selected)) return [];
+    return [{ id: param.id, value: selected }];
+  });
+  if (next.length === parameters.length) return next;
+  const preset = model?.variants?.find((item) => item.isDefault);
+  return parameters.flatMap((param) => {
+    const preferred = preset?.params.find((item) => item.id === param.id)?.value;
+    const value = param.values.some((item) => item.value === preferred) ? preferred : param.values[0]?.value;
+    return value ? [{ id: param.id, value }] : [];
+  });
+}
+
 function mapParameters(value: unknown): ModelParameter[] {
   if (!Array.isArray(value)) return [];
   const parameters: ModelParameter[] = [];

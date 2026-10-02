@@ -247,6 +247,41 @@ describe("Dispatcher", () => {
     expect(locks.holder("ws", "workflow")).toBeNull();
   });
 
+  it("开发步骤把裸模型落到默认变体参数", async () => {
+    const { runtime, calls } = scripted();
+    runtime.listModels = async () => [
+      {
+        id: "grok-4.7",
+        label: "Grok 4.7",
+        parameters: [
+          { id: "context", label: "上下文", values: [{ value: "256k", label: "256k" }, { value: "500k", label: "500k" }] },
+          { id: "reasoning_effort", label: "推理", values: [{ value: "low", label: "low" }, { value: "high", label: "high" }] },
+        ],
+        variants: [
+          {
+            label: "默认",
+            isDefault: true,
+            params: [
+              { id: "context", value: "500k" },
+              { id: "reasoning_effort", value: "high" },
+            ],
+          },
+        ],
+      },
+    ];
+    const { dispatcher } = await setup(runtime, 1);
+    db.prepare("UPDATE workspaces SET develop_model = ? WHERE id = 'ws'").run("grok-4.7");
+    await tick(dispatcher, 2);
+    expect(calls[1]).toMatchObject({
+      access: "develop",
+      model: "grok-4.7",
+      modelParams: [
+        { id: "context", value: "500k" },
+        { id: "reasoning_effort", value: "high" },
+      ],
+    });
+  });
+
   it("Review 使用单独模型，prompt 带验收标准和 diff，且不覆盖开发 agent", async () => {
     const { runtime, calls } = scripted();
     const { dispatcher, ids } = await setup(runtime, 1, undefined, "expensive");

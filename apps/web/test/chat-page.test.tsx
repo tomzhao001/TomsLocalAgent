@@ -203,6 +203,14 @@ const composerModel = {
         { id: "fast", value: "true" },
       ],
     },
+    {
+      label: "长上下文",
+      params: [
+        { id: "context", value: "1m" },
+        { id: "effort", value: "high" },
+        { id: "fast", value: "true" },
+      ],
+    },
   ],
 };
 
