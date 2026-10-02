@@ -39,14 +39,44 @@ describe("工作流框架", () => {
     const tools = stepTools((result) => seen.push(result));
     await tools.submit_verdict!.execute({ verdict: "reject", comments: "命名不清" });
     await tools.ask_user!.execute({ question: "用哪个数据库？" });
+    await tools.ask_user!.execute({
+      title: "存储",
+      questions: [
+        {
+          id: "db",
+          prompt: "用哪个数据库？",
+          options: [
+            { id: "sqlite", label: "SQLite" },
+            { id: "json", label: "JSON" },
+            { id: "other", label: "别的" },
+          ],
+        },
+      ],
+    });
     const bad = await tools.submit_verdict!.execute({ verdict: "maybe" });
     const empty = await tools.submit_verdict!.execute({ verdict: "reject", comments: "  " });
+    const missing = await tools.ask_user!.execute({});
     expect(seen).toEqual([
       { verdict: "reject", comments: "命名不清" },
       { verdict: "need_input", question: "用哪个数据库？" },
+      {
+        verdict: "need_input",
+        question: "存储",
+        questions: [
+          {
+            id: "db",
+            prompt: "用哪个数据库？",
+            options: [
+              { id: "sqlite", label: "SQLite" },
+              { id: "json", label: "JSON" },
+            ],
+          },
+        ],
+      },
     ]);
     expect(bad).toMatchObject({ isError: true });
     expect(empty).toMatchObject({ isError: true });
+    expect(missing).toMatchObject({ isError: true });
   });
 
   it("文本结果块兜底，结果按步骤转成状态机事件", () => {
@@ -61,6 +91,19 @@ describe("工作流框架", () => {
     expect(toLoopEvent("review", { verdict: "pass", comments: "" })).toEqual({ type: "review", pass: true });
     expect(toLoopEvent("devops", { verdict: "reject", comments: "推送失败" })).toEqual({ type: "devops", results: [false] });
     expect(toLoopEvent("develop", { verdict: "need_input", question: "?" })).toEqual({ type: "needInput", question: "?" });
+    const asked = parseResultBlock([
+      '<gateway-result>{"verdict":"need_input","questions":[{"id":"db","prompt":"用哪个？","options":[{"id":"sqlite","label":"SQLite"}]}]}</gateway-result>',
+    ]);
+    expect(asked).toEqual({
+      verdict: "need_input",
+      question: "用哪个？",
+      questions: [{ id: "db", prompt: "用哪个？", options: [{ id: "sqlite", label: "SQLite" }] }],
+    });
+    expect(toLoopEvent("develop", asked)).toEqual({
+      type: "needInput",
+      question: "用哪个？",
+      questions: [{ id: "db", prompt: "用哪个？", options: [{ id: "sqlite", label: "SQLite" }] }],
+    });
     expect(toLoopEvent("review", null)).toEqual({ type: "techError" });
   });
 });

@@ -19,6 +19,7 @@ import {
   type InputAction,
   type LoopAction,
   type LoopConfig,
+  type ChoiceQuestion,
   type LoopEvent,
   type StepId,
   type WaitKind,
@@ -65,6 +66,7 @@ export type WaitInfo = {
   message: string;
   comments?: string;
   options: InputAction[];
+  questions?: ChoiceQuestion[];
 };
 
 type RunStepAction = {
@@ -386,7 +388,14 @@ export class Dispatcher {
       pending = comments ? { ...action, comments } : action;
     } else if (action.kind === "waitInput") {
       status = "waiting_input";
-      wait = { kind: action.waitKind, fromStep: action.fromStep, message: action.reason, comments, options: action.options };
+      wait = {
+        kind: action.waitKind,
+        fromStep: action.fromStep,
+        message: action.reason,
+        comments,
+        options: action.options,
+        ...(action.questions?.length ? { questions: action.questions } : {}),
+      };
     } else if (action.kind === "aborted") {
       status = "aborted";
       finishedAt = now;

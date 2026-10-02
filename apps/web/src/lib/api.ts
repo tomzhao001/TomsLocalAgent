@@ -34,7 +34,16 @@ export type RequirementCard = {
   dependsOn?: number[];
 };
 
-export type StepResult = { verdict: "pass" | "reject"; comments: string } | { verdict: "need_input"; question: string };
+export type ChoiceQuestion = {
+  id: string;
+  prompt: string;
+  options: { id: string; label: string }[];
+  allowMultiple?: boolean;
+};
+
+export type StepResult =
+  | { verdict: "pass" | "reject"; comments: string }
+  | { verdict: "need_input"; question: string; questions?: ChoiceQuestion[] };
 
 export type StepRun = {
   id: string;
@@ -53,6 +62,7 @@ export type WaitInfo = {
   message: string;
   comments?: string;
   options: InputAction[];
+  questions?: ChoiceQuestion[];
 };
 
 export type Requirement = {

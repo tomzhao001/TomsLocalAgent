@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import type { InputAction, WaitInfo } from "@/lib/api";
+import type { ChoiceQuestion, InputAction, WaitInfo } from "@/lib/api";
 
 const waitTitles: Record<WaitInfo["kind"], string> = {
   question: "需要你回答",
@@ -11,27 +12,86 @@ const waitTitles: Record<WaitInfo["kind"], string> = {
   qaFailed: "E2E 未通过",
 };
 
-function actionLabel(action: InputAction, kind: WaitInfo["kind"]): string {
-  if (action === "answer") return kind === "question" ? "回答" : kind === "pushFailed" ? "重试推送" : "重试";
-  if (action === "continue") return "继续修改";
-  if (action === "forcePass") return "强制通过";
-  return "终止";
+const otherId = "other";
+
+function replyAction(kind: WaitInfo["kind"]): InputAction {
+  return kind === "limit" ? "continue" : "answer";
+}
+
+function pickedOf(selected: Record<string, string[]>, id: string): string[] {
+  return selected[id] ?? [];
+}
+
+function canSend(wait: WaitInfo, selected: Record<string, string[]>, otherText: Record<string, string>, plain: string): boolean {
+  const questions = wait.questions ?? [];
+  if (questions.length === 0) {
+    if (wait.kind === "question" || wait.kind === "limit") return plain.trim().length > 0;
+    return true;
+  }
+  return questions.every((question) => {
+    const picked = pickedOf(selected, question.id);
+    const choices = picked.filter((id) => id !== otherId);
+    const other = picked.includes(otherId);
+    if (choices.length === 0 && !other) return false;
+    if (other && !(otherText[question.id] ?? "").trim()) return false;
+    return true;
+  });
+}
+
+function composeReply(wait: WaitInfo, selected: Record<string, string[]>, otherText: Record<string, string>, plain: string): string {
+  const questions = wait.questions ?? [];
+  if (questions.length === 0) return plain.trim();
+  return questions
+    .map((question) => {
+      const picked = pickedOf(selected, question.id);
+      const labels = question.options.filter((option) => picked.includes(option.id)).map((option) => option.label);
+      if (picked.includes(otherId)) {
+        const text = (otherText[question.id] ?? "").trim();
+        if (text) labels.push(text);
+      }
+      const value = labels.join("、");
+      return questions.length === 1 ? value : `${question.prompt}：${value}`;
+    })
+    .join("\n");
 }
 
 export function WaitForm(props: { wait: WaitInfo; onSubmit: (action: InputAction, text: string) => Promise<void> }) {
-  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const [plain, setPlain] = useState("");
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [otherText, setOtherText] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const { wait } = props;
+  const questions = wait.questions ?? [];
 
-  async function submit(action: InputAction) {
+  function reset() {
+    setPlain("");
+    setSelected({});
+    setOtherText({});
+    setError("");
+    setSubmitted(false);
+  }
+
+  function toggle(question: ChoiceQuestion, optionId: string) {
+    setSelected((current) => {
+      const picked = pickedOf(current, question.id);
+      const next = question.allowMultiple
+        ? picked.includes(optionId)
+          ? picked.filter((id) => id !== optionId)
+          : [...picked, optionId]
+        : [optionId];
+      return { ...current, [question.id]: next };
+    });
+  }
+
+  async function submit() {
     setBusy(true);
     setError("");
     try {
-      await props.onSubmit(action, text.trim());
+      await props.onSubmit(replyAction(wait.kind), composeReply(wait, selected, otherText, plain));
       setSubmitted(true);
-      setText("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "提交失败");
     } finally {
@@ -39,36 +99,78 @@ export function WaitForm(props: { wait: WaitInfo; onSubmit: (action: InputAction
     }
   }
 
-  const needsText = (action: InputAction) => action === "continue" || (action === "answer" && wait.kind === "question");
+  const ready = canSend(wait, selected, otherText, plain);
 
   return (
-    <div role="alert" className="nodrag nopan nowheel flex flex-col gap-2 rounded-lg border border-amber-500/60 bg-amber-50 p-2 text-left text-xs">
-      <strong>{waitTitles[wait.kind]}</strong>
-      <p className="whitespace-pre-wrap">{wait.message}</p>
-      {wait.comments ? <p className="whitespace-pre-wrap text-muted-foreground">最近意见：{wait.comments}</p> : null}
-      {submitted ? <p className="text-emerald-700">已提交，将在下一次调度时继续</p> : null}
-      <Textarea
-        aria-label="你的输入"
-        className="min-h-16 bg-background text-xs"
-        value={text}
-        placeholder={wait.kind === "question" ? "输入你的回答" : "补充说明（可选）"}
-        onChange={(event) => setText(event.target.value)}
-      />
-      <div className="flex flex-wrap gap-1.5">
-        {wait.options.map((action) => (
-          <Button
-            key={action}
-            type="button"
-            size="xs"
-            variant={action === "abort" ? "destructive" : action === "forcePass" ? "outline" : "default"}
-            disabled={busy || (needsText(action) && !text.trim())}
-            onClick={() => void submit(action)}
-          >
-            {actionLabel(action, wait.kind)}
-          </Button>
-        ))}
+    <>
+      <div>
+        <Button type="button" size="sm" onClick={() => { reset(); setOpen(true); }}>
+          处理
+        </Button>
       </div>
-      {error ? <p className="text-destructive">{error}</p> : null}
-    </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[min(85svh,40rem)] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{waitTitles[wait.kind]}</DialogTitle>
+            <DialogDescription className="whitespace-pre-wrap text-foreground">{wait.message}</DialogDescription>
+          </DialogHeader>
+          {wait.comments ? <p className="whitespace-pre-wrap text-muted-foreground">补充信息：{wait.comments}</p> : null}
+          {questions.map((question) => {
+            const picked = pickedOf(selected, question.id);
+            return (
+              <fieldset key={question.id} className="flex flex-col gap-2">
+                <legend className="text-sm font-medium">{question.prompt}</legend>
+                <div className="flex flex-wrap gap-1.5">
+                  {question.options.map((option) => (
+                    <Button
+                      key={option.id}
+                      type="button"
+                      size="sm"
+                      variant={picked.includes(option.id) ? "default" : "outline"}
+                      aria-pressed={picked.includes(option.id)}
+                      onClick={() => toggle(question, option.id)}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={picked.includes(otherId) ? "default" : "outline"}
+                    aria-pressed={picked.includes(otherId)}
+                    onClick={() => toggle(question, otherId)}
+                  >
+                    Other
+                  </Button>
+                </div>
+                {picked.includes(otherId) ? (
+                  <Textarea
+                    aria-label={`${question.prompt}的其他回答`}
+                    className="min-h-16"
+                    value={otherText[question.id] ?? ""}
+                    placeholder="输入其他回答"
+                    onChange={(event) => setOtherText((current) => ({ ...current, [question.id]: event.target.value }))}
+                  />
+                ) : null}
+              </fieldset>
+            );
+          })}
+          {questions.length === 0 ? (
+            <Textarea
+              aria-label="你的输入"
+              className="min-h-16"
+              value={plain}
+              placeholder={wait.kind === "question" ? "输入你的回答" : wait.kind === "limit" ? "补充说明" : "补充说明（可选）"}
+              onChange={(event) => setPlain(event.target.value)}
+            />
+          ) : null}
+          {submitted ? <p className="text-emerald-700">已提交，将在下一次调度时继续</p> : null}
+          {error ? <p className="text-destructive">{error}</p> : null}
+          <Button type="button" disabled={busy || submitted || !ready} onClick={() => void submit()}>
+            发送
+          </Button>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

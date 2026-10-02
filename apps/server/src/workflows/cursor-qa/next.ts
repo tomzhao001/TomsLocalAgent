@@ -1,4 +1,4 @@
-import type { InputAction, WaitKind } from "../cursor-dev-loop/next.js";
+import type { ChoiceQuestion, InputAction, WaitKind } from "../cursor-dev-loop/next.js";
 
 export type QaState = {
   phase: "qa" | "waiting" | "done" | "aborted";
@@ -10,13 +10,13 @@ export type QaEvent =
   | { type: "start" }
   | { type: "qa"; pass: boolean }
   | { type: "techError" }
-  | { type: "needInput"; question: string }
+  | { type: "needInput"; question: string; questions?: ChoiceQuestion[] }
   | { type: "answer"; text: string }
   | { type: "abort" };
 
 export type QaAction =
   | { kind: "runStep"; nodeId: "qa"; cardIndex: number; prompt: string }
-  | { kind: "waitInput"; reason: string; waitKind: WaitKind; fromStep: "qa"; options: InputAction[] }
+  | { kind: "waitInput"; reason: string; waitKind: WaitKind; fromStep: "qa"; options: InputAction[]; questions?: ChoiceQuestion[] }
   | { kind: "cardDelivered"; cardIndex: number }
   | { kind: "aborted" };
 
@@ -45,7 +45,7 @@ export function nextQa(state: QaState, event: QaEvent): { state: QaState; action
   if (event.type === "start") return run(state, "开始 QA");
   if (event.type === "techError") return onTechError(state);
   if (state.phase === "waiting") return onWait(state, event);
-  if (event.type === "needInput") return wait(state, event.question, "question");
+  if (event.type === "needInput") return wait(state, event.question, "question", event.questions);
   if (state.phase === "qa" && event.type === "qa") {
     if (event.pass) {
       return { state: { ...state, phase: "done", waitingFrom: undefined, techErrors: 0 }, action: { kind: "cardDelivered", cardIndex: 0 } };
@@ -55,9 +55,13 @@ export function nextQa(state: QaState, event: QaEvent): { state: QaState; action
   return run(state, "保持 QA");
 }
 
-export function toQaEvent(result: { verdict: "pass" | "reject"; comments: string } | { verdict: "need_input"; question: string } | null): QaEvent {
+export function toQaEvent(
+  result: { verdict: "pass" | "reject"; comments: string } | { verdict: "need_input"; question: string; questions?: ChoiceQuestion[] } | null,
+): QaEvent {
   if (!result) return { type: "techError" };
-  if (result.verdict === "need_input") return { type: "needInput", question: result.question };
+  if (result.verdict === "need_input") {
+    return { type: "needInput", question: result.question, ...(result.questions?.length ? { questions: result.questions } : {}) };
+  }
   if (result.verdict === "reject" && !result.comments.trim()) return { type: "techError" };
   return { type: "qa", pass: result.verdict === "pass" };
 }
@@ -80,9 +84,16 @@ function run(state: QaState, prompt: string): { state: QaState; action: QaAction
   };
 }
 
-function wait(state: QaState, reason: string, waitKind: WaitKind): { state: QaState; action: QaAction } {
+function wait(state: QaState, reason: string, waitKind: WaitKind, questions?: ChoiceQuestion[]): { state: QaState; action: QaAction } {
   return {
     state: { ...state, phase: "waiting", waitingFrom: "qa", techErrors: 0 },
-    action: { kind: "waitInput", reason, waitKind, fromStep: "qa", options: retryOptions },
+    action: {
+      kind: "waitInput",
+      reason,
+      waitKind,
+      fromStep: "qa",
+      options: retryOptions,
+      ...(questions?.length ? { questions } : {}),
+    },
   };
 }

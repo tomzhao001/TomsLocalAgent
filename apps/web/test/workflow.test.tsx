@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { groupRequirements } from "../src/components/workflow/RequirementList";
 import { stepState } from "../src/components/workflow/RequirementFlow";
@@ -32,11 +32,47 @@ function run(step: StepRun["step"], status: StepRun["status"], result: StepRun["
 }
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
 });
 
-describe("被卡住节点的输入框", () => {
-  it("提问时必须填写回答才能提交", async () => {
+const questionWait = {
+  kind: "question" as const,
+  fromStep: "develop" as const,
+  message: "请选择存储方式",
+  options: ["answer" as const, "abort" as const],
+  questions: [
+    {
+      id: "db",
+      prompt: "用 SQLite 还是 JSON？",
+      options: [
+        { id: "sqlite", label: "SQLite" },
+        { id: "json", label: "JSON" },
+      ],
+    },
+  ],
+};
+
+describe("被卡住时的处理弹窗", () => {
+  it("选项点选后即可发送，Other 必须填写文字", async () => {
+    const onSubmit = vi.fn(async () => {});
+    render(<WaitForm wait={questionWait} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole("button", { name: "处理" }));
+    expect(screen.getByText("请选择存储方式")).toBeTruthy();
+    expect(screen.getByText("用 SQLite 还是 JSON？")).toBeTruthy();
+    const send = screen.getByRole("button", { name: "发送" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Other" }));
+    expect(send.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("用 SQLite 还是 JSON？的其他回答"), { target: { value: "Postgres" } });
+    expect(send.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "SQLite" }));
+    fireEvent.click(send);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("answer", "SQLite"));
+    expect(await screen.findByText("已提交，将在下一次调度时继续")).toBeTruthy();
+  });
+
+  it("没有选项的旧提问仍要填写文字", async () => {
     const onSubmit = vi.fn(async () => {});
     render(
       <WaitForm
@@ -44,16 +80,16 @@ describe("被卡住节点的输入框", () => {
         onSubmit={onSubmit}
       />,
     );
-    expect(screen.getByRole("alert").textContent).toContain("用 SQLite 还是 JSON？");
-    const answer = screen.getByRole("button", { name: "回答" }) as HTMLButtonElement;
-    expect(answer.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "处理" }));
+    const send = screen.getByRole("button", { name: "发送" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("你的输入"), { target: { value: "SQLite" } });
-    fireEvent.click(answer);
+    fireEvent.click(send);
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("answer", "SQLite"));
-    expect(await screen.findByText("已提交，将在下一次调度时继续")).toBeTruthy();
   });
 
-  it("超限时显示最近意见和强制通过", () => {
+  it("超限时只显示说明和发送", async () => {
+    const onSubmit = vi.fn(async () => {});
     render(
       <WaitForm
         wait={{
@@ -63,12 +99,18 @@ describe("被卡住节点的输入框", () => {
           comments: "拆分函数",
           options: ["continue", "forcePass", "abort"],
         }}
-        onSubmit={async () => {}}
+        onSubmit={onSubmit}
       />,
     );
-    expect(screen.getByText("最近意见：拆分函数")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "强制通过" }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByRole("button", { name: "继续修改" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "处理" }));
+    expect(screen.getByText("补充信息：拆分函数")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "强制通过" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "终止" })).toBeNull();
+    const send = screen.getByRole("button", { name: "发送" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("你的输入"), { target: { value: "继续改拆分" } });
+    fireEvent.click(send);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("continue", "继续改拆分"));
   });
 });
 

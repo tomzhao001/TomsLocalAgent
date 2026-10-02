@@ -1,7 +1,6 @@
 import { Handle, Position, ReactFlow, type BuiltInEdge, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { rejectLimits, stepLabels, workflowSteps, type InputAction, type Requirement, type StepId, type WaitInfo } from "@/lib/api";
-import { WaitForm } from "./WaitForm";
+import { rejectLimits, stepLabels, workflowSteps, type Requirement, type StepId } from "@/lib/api";
 
 export type StepState = "idle" | "queued" | "running" | "passed" | "rejected" | "error" | "waiting";
 
@@ -42,8 +41,6 @@ type StepNodeData = {
   state: StepState;
   attempts: number;
   selected: boolean;
-  wait: WaitInfo | null;
-  onInput?: (action: InputAction, text: string) => Promise<void>;
 };
 
 type StepFlowNode = Node<StepNodeData, "step">;
@@ -63,11 +60,6 @@ function StepNode({ data }: NodeProps<StepFlowNode>) {
           {data.attempts > 0 ? ` · ${data.attempts} 轮` : ""}
         </span>
       </div>
-      {data.state === "waiting" && data.wait && data.onInput ? (
-        <div className="mt-2" onClick={(event) => event.stopPropagation()}>
-          <WaitForm wait={data.wait} onSubmit={data.onInput} />
-        </div>
-      ) : null}
       <Handle type="source" position={Position.Bottom} id="bottom" className="opacity-0" />
     </div>
   );
@@ -77,13 +69,11 @@ const nodeTypes = { step: StepNode };
 
 const baseHeight = 56;
 const gap = 44;
-const waitHeight = 240;
 
 export function RequirementFlow(props: {
   requirement: Requirement;
   selected: StepId | null;
   onSelect: (step: StepId) => void;
-  onInput?: (action: InputAction, text: string) => Promise<void>;
 }) {
   const { requirement } = props;
   const steps = workflowSteps[requirement.workflowId] ?? workflowSteps["cursor-dev-loop"];
@@ -99,11 +89,9 @@ export function RequirementFlow(props: {
         state,
         attempts: requirement.steps.filter((run) => run.step === step).length,
         selected: props.selected === step,
-        wait: requirement.wait,
-        onInput: props.onInput,
       },
     };
-    y += baseHeight + gap + (state === "waiting" && props.onInput ? waitHeight : 0);
+    y += baseHeight + gap;
     return node;
   });
   const overReview = requirement.reviewRejects > rejectLimits.review;
@@ -136,12 +124,15 @@ export function RequirementFlow(props: {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.08, maxZoom: 1 }}
+        defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+        minZoom={1}
+        maxZoom={1}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
         zoomOnScroll={false}
+        zoomOnPinch={false}
+        zoomOnDoubleClick={false}
         panOnScroll={false}
         preventScrolling={false}
         proOptions={{ hideAttribution: true }}

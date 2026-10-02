@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { api, rejectLimits, stepLabels, workflowLabels, type Feature, type InputAction, type Requirement, type StepId } from "@/lib/api";
 import { RequirementFlow } from "./RequirementFlow";
 import { StepLogPanel } from "./StepLogPanel";
+import { WaitForm } from "./WaitForm";
 
 const statusLabels: Record<Requirement["status"], string> = {
   pending: "排队中",
@@ -166,13 +167,11 @@ function RequirementDetail(props: { item: Requirement; readOnly?: boolean; onCha
           </Button>
         </div>
       ) : null}
+      {detail.status === "waiting_input" && detail.wait && !props.readOnly ? (
+        <WaitForm wait={detail.wait} onSubmit={submitInput} />
+      ) : null}
       {detail.status !== "pending" ? (
-        <RequirementFlow
-          requirement={detail}
-          selected={selected}
-          onSelect={setSelected}
-          onInput={props.readOnly ? undefined : submitInput}
-        />
+        <RequirementFlow requirement={detail} selected={selected} onSelect={setSelected} />
       ) : null}
       {selected ? <StepLogPanel step={selected} runs={detail.steps.filter((run) => run.step === selected)} /> : null}
       {detail.status !== "pending" && !selected ? <p className="text-xs text-muted-foreground">点击节点查看这一步的日志</p> : null}

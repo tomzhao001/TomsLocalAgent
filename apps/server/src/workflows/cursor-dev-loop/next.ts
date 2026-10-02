@@ -23,7 +23,7 @@ export type LoopEvent =
   | { type: "review"; pass: boolean }
   | { type: "devops"; results: boolean[] }
   | { type: "techError" }
-  | { type: "needInput"; question: string }
+  | { type: "needInput"; question: string; questions?: ChoiceQuestion[] }
   | { type: "answer"; text: string }
   | { type: "continue"; text: string }
   | { type: "forcePass" }
@@ -33,9 +33,16 @@ export type WaitKind = "question" | "limit" | "pushFailed" | "techError" | "qaFa
 
 export type InputAction = "answer" | "continue" | "forcePass" | "abort";
 
+export type ChoiceQuestion = {
+  id: string;
+  prompt: string;
+  options: { id: string; label: string }[];
+  allowMultiple?: boolean;
+};
+
 export type LoopAction =
   | { kind: "runStep"; nodeId: StepId; cardIndex: number; prompt: string }
-  | { kind: "waitInput"; reason: string; waitKind: WaitKind; fromStep: StepId; options: InputAction[] }
+  | { kind: "waitInput"; reason: string; waitKind: WaitKind; fromStep: StepId; options: InputAction[]; questions?: ChoiceQuestion[] }
   | { kind: "cardDelivered"; cardIndex: number }
   | { kind: "done" }
   | { kind: "aborted" };
@@ -88,7 +95,7 @@ export function nextLoop(state: DevLoopState, event: LoopEvent, cfg: LoopConfig 
   if (event.type === "start") return run(state, "plan", "先写计划");
   if (event.type === "techError") return onTechError(state);
   if (state.phase === "waiting") return onWait(state, event);
-  if (event.type === "needInput") return wait(clearTech(state), state.phase, event.question, "question");
+  if (event.type === "needInput") return wait(clearTech(state), state.phase, event.question, "question", event.questions);
   if (state.phase === "plan" && event.type === "stepOk") return run(clearTech(state, "develop"), "develop", "按计划开发");
   if (state.phase === "develop" && event.type === "stepOk") return run(clearTech(state, "review"), "review", "Review");
   if (state.phase === "review" && event.type === "review") return onReview(state, event.pass, cfg);
@@ -155,10 +162,23 @@ function runAction(state: DevLoopState, nodeId: StepId, prompt: string): LoopAct
   return { kind: "runStep", nodeId, cardIndex: state.index, prompt };
 }
 
-function wait(state: DevLoopState, from: StepId, reason: string, waitKind: WaitKind): { state: DevLoopState; action: LoopAction } {
+function wait(
+  state: DevLoopState,
+  from: StepId,
+  reason: string,
+  waitKind: WaitKind,
+  questions?: ChoiceQuestion[],
+): { state: DevLoopState; action: LoopAction } {
   return {
     state: { ...state, phase: "waiting", waitingFrom: from, techErrors: 0 },
-    action: { kind: "waitInput", reason, waitKind, fromStep: from, options: waitOptions[waitKind] },
+    action: {
+      kind: "waitInput",
+      reason,
+      waitKind,
+      fromStep: from,
+      options: waitOptions[waitKind],
+      ...(questions?.length ? { questions } : {}),
+    },
   };
 }
 

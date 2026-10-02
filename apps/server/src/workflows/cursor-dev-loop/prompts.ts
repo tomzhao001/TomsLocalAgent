@@ -1,8 +1,9 @@
 import type { RequirementCard } from "@gateway/shared";
 import type { StepId } from "./next.js";
 
-const resultRule = `完成后必须调用 submit_verdict 工具提交结果；遇到必须由用户决定的问题时调用 ask_user 工具，然后立即结束本轮回复。
-如果工具不可用，就在回复最后单独输出一行：<gateway-result>{"verdict":"pass|reject|need_input","comments":"...","question":"..."}</gateway-result>`;
+const resultRule = `完成后必须调用 submit_verdict 工具提交结果。遇到必须由用户决定的问题时调用 ask_user，然后立即结束本轮回复。
+ask_user 必须带 questions：每题有 id、prompt，以及可点选的 options（每项有 id 和 label）。不要只把选项写在正文里。
+如果工具不可用，就在回复最后单独输出一行：<gateway-result>{"verdict":"pass|reject|need_input","comments":"...","question":"...","questions":[{"id":"q1","prompt":"...","options":[{"id":"a","label":"..."}]}]}</gateway-result>`;
 
 const stepGuide: Record<StepId, string> = {
   plan: `你是计划。根据需求卡和已有意见写出实现计划，不要修改任何文件。
