@@ -176,14 +176,17 @@ function RequirementDetail(props: { item: Requirement; readOnly?: boolean; onCha
       ) : null}
       {detail.status !== "pending" ? <p className="text-xs text-muted-foreground">点击节点查看这一步的日志</p> : null}
       <Dialog open={selected !== null} onOpenChange={(open) => { if (!open) setSelected(null); }}>
-        <DialogContent className="max-h-[min(85svh,40rem)] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="max-h-[min(85svh,40rem)] min-w-0 overflow-x-hidden overflow-y-auto *:min-w-0 sm:max-w-lg">
           {selected ? (
             <>
               <DialogHeader>
                 <DialogTitle>{stepLabels[selected]} 日志</DialogTitle>
                 <DialogDescription className="sr-only">这一步的运行记录</DialogDescription>
               </DialogHeader>
-              <StepLogPanel runs={detail.steps.filter((run) => run.step === selected)} />
+              <StepLogPanel
+                runs={detail.steps.filter((run) => run.step === selected)}
+                planRuns={detail.steps.filter((run) => run.step === "plan")}
+              />
             </>
           ) : null}
         </DialogContent>

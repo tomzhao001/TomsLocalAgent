@@ -40,7 +40,7 @@ export function LogView({ url, running, scroll = true }: { url: string; running:
   usePolling(load, 10_000, running);
 
   const body = (
-    <div className={`flex flex-col gap-2 text-xs leading-5 ${scroll ? "p-3" : ""}`}>
+    <div className={`flex min-w-0 max-w-full flex-col gap-2 text-[10px] leading-4 wrap-break-word ${scroll ? "p-3" : ""}`}>
       {bubbles.length === 0 ? <p className="text-muted-foreground">暂无日志</p> : null}
       {bubbles.map((bubble, index) => (
         <LogBubble key={index} bubble={bubble} />
@@ -50,14 +50,14 @@ export function LogView({ url, running, scroll = true }: { url: string; running:
   );
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-w-0 max-w-full flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">{running ? "运行中，每 10 秒自动刷新" : "已结束"}</span>
         <Button type="button" size="icon-xs" variant="ghost" aria-label="刷新日志" disabled={loading} onClick={() => void load()}>
           <RefreshCw />
         </Button>
       </div>
-      {scroll ? <ScrollArea className="max-h-80 rounded-lg border">{body}</ScrollArea> : body}
+      {scroll ? <ScrollArea className="max-h-80 min-w-0 overflow-x-hidden rounded-lg border">{body}</ScrollArea> : body}
     </div>
   );
 }
@@ -67,13 +67,13 @@ function LogBubble({ bubble }: { bubble: ChatBubble }) {
     return (
       <details className="text-muted-foreground">
         <summary className="cursor-pointer">思考</summary>
-        <p className="whitespace-pre-wrap">{bubble.text}</p>
+        <p className="wrap-break-word whitespace-pre-wrap">{bubble.text}</p>
       </details>
     );
   }
   if (bubble.role === "tool") {
     return (
-      <p className="font-mono text-muted-foreground">
+      <p className="font-mono wrap-break-word text-muted-foreground">
         {bubble.running ? "→" : "✓"} {toolLine(bubble.name, bubble.detail)}
       </p>
     );
@@ -88,9 +88,9 @@ function LogBubble({ bubble }: { bubble: ChatBubble }) {
       </p>
     );
   }
-  if (bubble.role === "error") return <p className="whitespace-pre-wrap text-destructive">{bubble.text}</p>;
+  if (bubble.role === "error") return <p className="wrap-break-word whitespace-pre-wrap text-destructive">{bubble.text}</p>;
   if (bubble.role === "done") return <p className="text-muted-foreground">结束：{bubble.status}</p>;
-  if (bubble.role === "assistant" || bubble.role === "user") return <p className="whitespace-pre-wrap">{bubble.text}</p>;
+  if (bubble.role === "assistant" || bubble.role === "user") return <p className="wrap-break-word whitespace-pre-wrap">{bubble.text}</p>;
   return null;
 }
 

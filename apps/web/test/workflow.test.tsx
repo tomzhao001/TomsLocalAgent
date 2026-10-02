@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { groupRequirements } from "../src/components/workflow/RequirementList";
 import { stepState } from "../src/components/workflow/RequirementFlow";
+import { planForRun, StepLogPanel } from "../src/components/workflow/StepLogPanel";
 import { SplitTasks } from "../src/components/workflow/SplitTasks";
 import { WaitForm } from "../src/components/workflow/WaitForm";
 import type { Requirement, StepRun } from "../src/lib/api";
@@ -111,6 +112,73 @@ describe("被卡住时的处理弹窗", () => {
     fireEvent.change(screen.getByLabelText("你的输入"), { target: { value: "继续改拆分" } });
     fireEvent.click(send);
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("continue", "继续改拆分"));
+  });
+});
+
+describe("查看 Plan", () => {
+  it("计划轮有正文才算计划，开发轮对上它之前最近的一份", () => {
+    const first: StepRun = {
+      ...run("plan", "finished", { verdict: "pass", comments: "先写失败测试" }),
+      id: "p1",
+      startedAt: 10,
+    };
+    const blank: StepRun = {
+      ...run("plan", "finished", { verdict: "pass", comments: "  " }),
+      id: "p-blank",
+      attempt: 2,
+      startedAt: 20,
+    };
+    const rejected: StepRun = {
+      ...run("plan", "finished", { verdict: "reject", comments: "计划不行" }),
+      id: "p-rej",
+      attempt: 3,
+      startedAt: 25,
+    };
+    const develop: StepRun = { ...run("develop", "finished", { verdict: "pass", comments: "npm test" }), id: "d1", startedAt: 30 };
+    const rewritten: StepRun = {
+      ...run("plan", "finished", { verdict: "pass", comments: "改计划后再测" }),
+      id: "p2",
+      attempt: 4,
+      startedAt: 40,
+    };
+    const later: StepRun = { ...run("develop", "finished"), id: "d2", attempt: 2, startedAt: 50 };
+    const plans = [rewritten, blank, rejected, first];
+    expect(planForRun(first, plans)).toBe("先写失败测试");
+    expect(planForRun(blank, plans)).toBeNull();
+    expect(planForRun(rejected, plans)).toBeNull();
+    expect(planForRun(develop, plans)).toBe("先写失败测试");
+    expect(planForRun(later, plans)).toBe("改计划后再测");
+    expect(planForRun({ ...run("review", "finished"), id: "r1", startedAt: 60 }, plans)).toBeNull();
+  });
+
+  it("计划和开发日志都能打开对应的 Plan，空计划不显示按钮", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ events: [], nextOffset: 0 }), { status: 200 })),
+    );
+    const plan: StepRun = {
+      ...run("plan", "finished", { verdict: "pass", comments: "先写失败测试" }),
+      id: "p1",
+      startedAt: 10,
+    };
+    const develop: StepRun = {
+      ...run("develop", "finished", { verdict: "pass", comments: "npm test 通过" }),
+      id: "d1",
+      startedAt: 20,
+    };
+    const { rerender } = render(<StepLogPanel runs={[plan]} planRuns={[plan]} />);
+    expect(screen.getByText("通过")).toBeTruthy();
+    expect(screen.queryByText("先写失败测试")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "查看 Plan" }));
+    expect(screen.getByText("先写失败测试")).toBeTruthy();
+
+    rerender(<StepLogPanel runs={[develop]} planRuns={[plan]} />);
+    expect(screen.getByText("通过：npm test 通过")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "查看 Plan" }));
+    expect(screen.getByText("先写失败测试")).toBeTruthy();
+
+    rerender(<StepLogPanel runs={[{ ...plan, result: { verdict: "pass", comments: " " } }]} planRuns={[]} />);
+    expect(screen.queryByRole("button", { name: "查看 Plan" })).toBeNull();
   });
 });
 
