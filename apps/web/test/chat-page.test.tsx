@@ -63,6 +63,14 @@ describe("聊天页", () => {
     render(<ChatPage workspaceId="ws" onSplitStarted={() => {}} />);
     expect(await screen.findByRole("combobox", { name: "对话方式" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "对话方式" }).textContent).toContain("Agent");
+    fireEvent.pointerDown(screen.getByRole("combobox", { name: "对话方式" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(screen.queryByRole("option", { name: "Plan" })).toBeNull();
+    expect(screen.getByRole("option", { name: "Ask" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Agent" })).toBeTruthy();
     expect(screen.getByText("Agent 会直接修改这个 workspace 里的文件。")).toBeTruthy();
     expect(await screen.findByText("1. 改表单")).toBeTruthy();
     expect(screen.getByText("待办：改表单")).toBeTruthy();
@@ -115,9 +123,88 @@ describe("聊天页", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/runs/r1/cancel", expect.objectContaining({ method: "POST" })),
     );
   });
+
+  it("模型参数在弹窗里修改，放大编辑确定后写回并随消息发送", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/sessions/s1/messages" && init?.method === "POST") return json({ runId: "r2" });
+      if (url.startsWith("/api/providers/")) return json([composerModel]);
+      return response(url);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", class { close() {} });
+    render(<ChatPage workspaceId="ws" chatModel="composer" onSplitStarted={() => {}} />);
+    const summary = await screen.findByRole("button", { name: "模型" });
+    expect(summary.textContent).toContain("Composer 2.5 · 200k · high · Fast");
+    fireEvent.click(summary);
+    fireEvent.pointerDown(screen.getByRole("combobox", { name: "上下文" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "1M" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.getByRole("button", { name: "模型" }).textContent).toContain("200k");
+    fireEvent.click(screen.getByRole("button", { name: "模型" }));
+    fireEvent.pointerDown(screen.getByRole("combobox", { name: "上下文" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "1M" }));
+    fireEvent.click(screen.getByRole("button", { name: "确定" }));
+    expect(screen.getByRole("button", { name: "模型" }).textContent).toContain("Composer 2.5 · 1M · high · Fast");
+
+    fireEvent.change(screen.getByPlaceholderText("输入消息"), { target: { value: "短" } });
+    fireEvent.click(screen.getByRole("button", { name: "放大输入" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "放大后的消息" }), { target: { value: "不要这版" } });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect((screen.getByPlaceholderText("输入消息") as HTMLTextAreaElement).value).toBe("短");
+    fireEvent.click(screen.getByRole("button", { name: "放大输入" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "放大后的消息" }), { target: { value: "很长的消息" } });
+    fireEvent.click(screen.getByRole("button", { name: "确定" }));
+    expect((screen.getByPlaceholderText("输入消息") as HTMLTextAreaElement).value).toBe("很长的消息");
+
+    await chooseRecent(cursorChatTitle(sessionCreatedAt));
+    await waitFor(() => expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url]) => url === "/api/sessions/s1/messages");
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+        prompt: "很长的消息",
+        model: "composer",
+        params: [
+          { id: "context", value: "1m" },
+          { id: "effort", value: "high" },
+          { id: "fast", value: "true" },
+        ],
+        mode: "agent",
+      });
+    });
+  });
 });
 
 const sessionCreatedAt = Date.parse("2026-10-01T02:04:00");
+
+const composerModel = {
+  id: "composer",
+  label: "Composer 2.5",
+  parameters: [
+    { id: "context", label: "上下文", values: [{ value: "200k", label: "200k" }, { value: "1m", label: "1M" }] },
+    { id: "effort", label: "effort", values: [{ value: "low", label: "low" }, { value: "high", label: "high" }] },
+    { id: "fast", label: "fast", values: [{ value: "false", label: "标准" }, { value: "true", label: "Fast" }] },
+  ],
+  variants: [
+    {
+      label: "默认",
+      isDefault: true,
+      params: [
+        { id: "context", value: "200k" },
+        { id: "effort", value: "high" },
+        { id: "fast", value: "true" },
+      ],
+    },
+  ],
+};
 
 function response(url: string): Response {
   if (url.startsWith("/api/sessions?")) {

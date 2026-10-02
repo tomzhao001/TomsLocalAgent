@@ -100,7 +100,95 @@ export function takeOpencodePart(seen: Set<string>, event: { type?: string; prop
   return null;
 }
 
-export type ModelInfo = { id: string; label: string };
+export type ModelParam = { id: string; value: string };
+export type ModelParameter = { id: string; label: string; values: { value: string; label: string }[] };
+export type ModelVariant = { label: string; params: ModelParam[]; isDefault?: boolean };
+export type ModelInfo = {
+  id: string;
+  label: string;
+  parameters?: ModelParameter[];
+  variants?: ModelVariant[];
+};
+
+export function mapCursorModels(listed: unknown): ModelInfo[] {
+  if (!Array.isArray(listed)) return [];
+  const items: ModelInfo[] = [];
+  for (const raw of listed) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const id = text(item.id);
+    if (!id) continue;
+    const parameters = mapParameters(item.parameters);
+    const variants = mapVariants(item.variants);
+    items.push({
+      id,
+      label: text(item.displayName) ?? text(item.name) ?? id,
+      ...(parameters.length ? { parameters } : {}),
+      ...(variants.length ? { variants } : {}),
+    });
+  }
+  return items;
+}
+
+export function parseModelParams(value: unknown): ModelParam[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const params: ModelParam[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const id = text(item.id);
+    const paramValue = text(item.value);
+    if (!id || !paramValue) continue;
+    params.push({ id, value: paramValue });
+  }
+  return params.length ? params : undefined;
+}
+
+export function modelSelection(id: string, params?: ModelParam[]): { id: string; params?: ModelParam[] } {
+  return params?.length ? { id, params } : { id };
+}
+
+function mapParameters(value: unknown): ModelParameter[] {
+  if (!Array.isArray(value)) return [];
+  const parameters: ModelParameter[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const id = text(item.id);
+    if (!id || !Array.isArray(item.values)) continue;
+    const values = item.values.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const option = entry as Record<string, unknown>;
+      const optionValue = text(option.value);
+      if (!optionValue) return [];
+      return [{ value: optionValue, label: text(option.displayName) ?? optionValue }];
+    });
+    if (!values.length) continue;
+    parameters.push({ id, label: text(item.displayName) ?? id, values });
+  }
+  return parameters;
+}
+
+function mapVariants(value: unknown): ModelVariant[] {
+  if (!Array.isArray(value)) return [];
+  const variants: ModelVariant[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const params = parseModelParams(item.params);
+    if (!params) continue;
+    variants.push({
+      label: text(item.displayName) ?? params.map((param) => param.value).join(" "),
+      params,
+      ...(item.isDefault === true ? { isDefault: true } : {}),
+    });
+  }
+  return variants;
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
 
 export type OpenCodeProviderConfig = {
   id?: string;

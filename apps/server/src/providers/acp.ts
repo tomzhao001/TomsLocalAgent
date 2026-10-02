@@ -321,6 +321,11 @@ async function runTurn(
     if (input.model && modelOption.currentValue !== input.model) {
       await current.request("session/set_config_option", { sessionId, configId: modelOption.id, value: input.model });
     }
+    for (const param of input.modelParams ?? []) {
+      const option = configById(session.configOptions).get(param.id);
+      if (!option || option.id === modelOption.id || option.currentValue === param.value) continue;
+      await current.request("session/set_config_option", { sessionId, configId: option.id, value: param.value });
+    }
 
     const result = await current.request("session/prompt", {
       sessionId,
@@ -461,6 +466,18 @@ function availableModes(value: unknown): string[] | null {
     return id ? [id] : [];
   });
   return ids.length ? ids : null;
+}
+
+function configById(value: unknown): Map<string, { id: string; currentValue?: string }> {
+  const found = new Map<string, { id: string; currentValue?: string }>();
+  if (!Array.isArray(value)) return found;
+  for (const item of value) {
+    const option = asRecord(item);
+    const id = stringOf(option.id);
+    if (!id) continue;
+    found.set(id, { id, currentValue: stringOf(option.currentValue) });
+  }
+  return found;
 }
 
 function modelConfig(value: unknown): { id: string; currentValue?: string } | null {

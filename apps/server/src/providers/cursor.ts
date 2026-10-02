@@ -1,7 +1,7 @@
 import type { GatewayEvent } from "@gateway/shared";
 import type { AgentRuntime, GatewayTool, RunContext } from "../runs.js";
 import { accessForChat, cursorAccess, promptWithRules, withRules, type CursorAccess } from "./access.js";
-import { classifyCursorFailure, mapCursorEvent, type CursorStreamEvent, type ModelInfo } from "./map.js";
+import { classifyCursorFailure, mapCursorEvent, modelSelection, type CursorStreamEvent, type ModelInfo, type ModelParam } from "./map.js";
 
 export type CursorRun = {
   stream: () => AsyncIterable<CursorStreamEvent>;
@@ -10,7 +10,7 @@ export type CursorRun = {
 };
 
 export type CursorSendOptions = {
-  model: { id: string };
+  model: { id: string; params?: ModelParam[] };
   mode: CursorAccess["mode"];
   customTools?: Record<string, GatewayTool>;
 };
@@ -20,7 +20,7 @@ export type CursorAgent = {
   send: (prompt: string, options: CursorSendOptions) => Promise<CursorRun>;
 };
 
-export type CursorAgentOptions = { cwd: string; model: string; access: CursorAccess };
+export type CursorAgentOptions = { cwd: string; model: string; modelParams?: ModelParam[]; access: CursorAccess };
 
 export type CursorSdk = {
   models: ModelInfo[];
@@ -37,11 +37,16 @@ export function createCursorRuntime(sdk: CursorSdk): AgentRuntime {
       try {
         const profile = input.access ?? "chat";
         const access = profile === "chat" ? accessForChat(input.chatMode) : cursorAccess[profile];
-        const options = { cwd: input.cwd, model: input.model, access };
+        const options = {
+          cwd: input.cwd,
+          model: input.model,
+          ...(input.modelParams?.length ? { modelParams: input.modelParams } : {}),
+          access,
+        };
         const agent = input.agentId ? await sdk.resume(input.agentId, options) : await sdk.create(options);
         if (agent.agentId !== input.agentId) input.onAgent?.(agent.agentId);
         const run = await agent.send(profile === "chat" ? promptWithRules(access, input.prompt) : withRules(profile, input.prompt), {
-          model: { id: input.model },
+          model: modelSelection(input.model, input.modelParams),
           mode: access.mode,
           customTools: input.customTools,
         });

@@ -8,6 +8,7 @@ import { appendLog, logFile, readLog } from "./logs.js";
 import type { WorkspaceLockManager } from "./locks.js";
 import type { AccessProfile } from "./providers/access.js";
 import { readonlyViolation, watchReadonly } from "./providers/guard.js";
+import { parseModelParams, type ModelInfo, type ModelParam } from "./providers/map.js";
 import { recordPlan } from "./providers/plan-doc.js";
 
 export const interruptedReply = "上次回答已中断";
@@ -26,6 +27,7 @@ export type RunContext = {
   workspaceId: string;
   prompt: string;
   model: string;
+  modelParams?: ModelParam[];
   cwd: string;
   access?: AccessProfile;
   chatMode?: "ask" | "plan" | "agent";
@@ -38,7 +40,7 @@ export type RunTerminal = "finished" | "error" | "cancelled";
 
 export type AgentRuntime = {
   startRun(input: RunContext, emit: (event: GatewayEvent) => void, signal?: AbortSignal): Promise<RunTerminal | void>;
-  listModels?: () => Promise<{ id: string; label: string }[]>;
+  listModels?: () => Promise<ModelInfo[]>;
 };
 
 export function createFakeRuntime(): AgentRuntime {
@@ -102,7 +104,7 @@ export function registerRuns(
     if (!session) return reply.code(404).send({ error: "not_found", message: "聊天不存在" });
     const runtime = options.runtimes?.[session.provider] ?? options.runtime;
     if (!runtime) return reply.code(501).send({ error: "no_runtime", message: "当前没有可用的 agent" });
-    const body = request.body as { prompt?: string; model?: string; mode?: string };
+    const body = request.body as { prompt?: string; model?: string; mode?: string; params?: unknown };
     if (!body.prompt?.trim()) return reply.code(400).send({ error: "invalid", message: "prompt 必填" });
 
     const workspace = db.prepare("SELECT path, repos_json FROM workspaces WHERE id = ?").get(session.workspace_id) as {
@@ -129,6 +131,7 @@ export function registerRuns(
       workspaceId: session.workspace_id,
       prompt: body.prompt,
       model,
+      modelParams: parseModelParams(body.params),
       cwd: workspace.path,
       access: "chat",
       chatMode: body.mode === "plan" ? "plan" : body.mode === "agent" ? "agent" : "ask",

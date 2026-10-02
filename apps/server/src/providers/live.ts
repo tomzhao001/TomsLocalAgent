@@ -2,13 +2,12 @@ import type { AgentRuntime, GatewayTool } from "../runs.js";
 import { opencodeReadonly } from "./access.js";
 import { createCursorRuntime, type CursorAgentOptions, type CursorSdk, type CursorSendOptions } from "./cursor.js";
 import { createOpenCodeRuntime } from "./opencode.js";
-import { cachedModels, flattenOpenCodeModels } from "./map.js";
+import { cachedModels, flattenOpenCodeModels, mapCursorModels, modelSelection } from "./map.js";
 
 export async function loadCursorRuntime(apiKey: string): Promise<AgentRuntime> {
   const sdk = (await import("@cursor/sdk")) as any;
   const models = cachedModels(async () => {
-    const listed = await sdk.Cursor.models.list({ apiKey });
-    return (listed ?? []).map((item: { id: string; name?: string }) => ({ id: item.id, label: item.name ?? item.id }));
+    return mapCursorModels(await sdk.Cursor.models.list({ apiKey }));
   });
   const cursor = createCursorRuntime(adapt(sdk, apiKey));
   return { ...cursor, listModels: models };
@@ -73,7 +72,7 @@ export async function loadOpenCodeRuntime(options: { port: number; password?: st
 function adapt(sdk: any, apiKey: string): CursorSdk {
   const agentOptions = (options: CursorAgentOptions) => ({
     apiKey,
-    model: { id: options.model },
+    model: modelSelection(options.model, options.modelParams),
     mode: options.access.mode,
     ...(options.access.tools ? { tools: options.access.tools } : {}),
     local: { cwd: options.cwd },

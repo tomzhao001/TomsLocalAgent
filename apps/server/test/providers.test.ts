@@ -12,7 +12,7 @@ import {
   type CursorSendOptions,
 } from "../src/providers/cursor.js";
 import { createOpenCodeRuntime } from "../src/providers/opencode.js";
-import { cachedModels, classifyCursorFailure, flattenOpenCodeModels, mapCursorEvent, takeOpencodePart } from "../src/providers/map.js";
+import { cachedModels, classifyCursorFailure, flattenOpenCodeModels, mapCursorEvent, mapCursorModels, takeOpencodePart } from "../src/providers/map.js";
 import type { AgentRuntime } from "../src/runs.js";
 
 describe("SDK 事件映射", () => {
@@ -45,6 +45,39 @@ describe("SDK 事件映射", () => {
     };
     expect(takeOpencodePart(seen, event)).toEqual({ type: "text", text: "甲" });
     expect(takeOpencodePart(seen, event)).toBeNull();
+  });
+
+  it("Cursor 模型保留参数和默认组合", () => {
+    expect(
+      mapCursorModels([
+        {
+          id: "composer-2.5",
+          displayName: "Composer 2.5",
+          parameters: [
+            { id: "effort", displayName: "effort", values: [{ value: "low" }, { value: "high", displayName: "high" }] },
+            { id: "fast", displayName: "Fast", values: [{ value: "true", displayName: "Fast" }] },
+          ],
+          variants: [
+            { displayName: "默认", isDefault: true, params: [{ id: "effort", value: "high" }, { id: "fast", value: "true" }] },
+            { params: [{ id: "skip", value: "" }] },
+          ],
+        },
+        { name: "只有名字" },
+        { id: "auto", name: "Auto" },
+      ]),
+    ).toEqual([
+      {
+        id: "composer-2.5",
+        label: "Composer 2.5",
+        parameters: [
+          { id: "effort", label: "effort", values: [{ value: "low", label: "low" }, { value: "high", label: "high" }] },
+          { id: "fast", label: "Fast", values: [{ value: "true", label: "Fast" }] },
+        ],
+        variants: [{ label: "默认", isDefault: true, params: [{ id: "effort", value: "high" }, { id: "fast", value: "true" }] }],
+      },
+      { id: "auto", label: "Auto" },
+    ]);
+    expect(mapCursorModels(null)).toEqual([]);
   });
 
   it("把 OpenCode provider 摊成 provider/model", () => {
@@ -89,7 +122,7 @@ describe("注入的 SDK", () => {
   });
 
   it("换模型只影响这一次 run，取消后状态是 cancelled", async () => {
-    const models: string[] = [];
+    const models: { id: string; params?: { id: string; value: string }[] }[] = [];
     const cursor = createCursorRuntime(scriptedCursor(models));
     const hanging: AgentRuntime = {
       async startRun(_input, _emit, signal) {
@@ -119,9 +152,13 @@ describe("注入的 SDK", () => {
     const cursorSession = await authed("POST", "/api/sessions", { provider: "cursor", workspaceId: ws.json().id });
     const first = await authed("POST", `/api/sessions/${cursorSession.json().id}/messages`, { prompt: "一", model: "composer-a" });
     await waitStatus(authed, first.json().runId, "finished");
-    const second = await authed("POST", `/api/sessions/${cursorSession.json().id}/messages`, { prompt: "二", model: "composer-b" });
+    const second = await authed("POST", `/api/sessions/${cursorSession.json().id}/messages`, {
+      prompt: "二",
+      model: "composer-b",
+      params: [{ id: "effort", value: "high" }, { id: "", value: "x" }, { value: "low" }],
+    });
     await waitStatus(authed, second.json().runId, "finished");
-    expect(models).toEqual(["composer-a", "composer-b"]);
+    expect(models).toEqual([{ id: "composer-a" }, { id: "composer-b", params: [{ id: "effort", value: "high" }] }]);
 
     const oc = await authed("POST", "/api/sessions", { provider: "opencode", workspaceId: ws.json().id });
     const running = await authed("POST", `/api/sessions/${oc.json().id}/messages`, { prompt: "停", model: "deepseek" });
@@ -184,6 +221,17 @@ describe("注入的 SDK", () => {
     expect(calls[2]?.options.access).toEqual({ mode: "agent", rules: "" });
     expect(calls[2]?.send?.mode).toBe("agent");
     expect(calls[2]?.prompt).toBe("看看");
+    expect(calls[2]?.send?.model).toEqual({ id: "m" });
+  });
+
+  it("本次发送把模型参数交给 create 和 send", async () => {
+    const calls: { kind: "create" | "resume"; options: CursorAgentOptions; send?: CursorSendOptions; prompt?: string }[] = [];
+    const runtime = createCursorRuntime(recordingCursor(calls));
+    const params = [{ id: "effort", value: "high" }, { id: "fast", value: "true" }];
+    const base = { sessionId: "s", runId: "r", workspaceId: "w", prompt: "看看", model: "m", cwd: "/", access: "develop" as const };
+    await runtime.startRun({ ...base, modelParams: params, agentId: null }, () => {});
+    expect(calls[0]?.options.modelParams).toEqual(params);
+    expect(calls[0]?.send?.model).toEqual({ id: "m", params });
   });
 
   it("OpenCode 拒绝非聊天的运行", async () => {
@@ -226,7 +274,7 @@ describe("注入的 SDK", () => {
   });
 });
 
-function scriptedCursor(models: string[]): CursorSdk {
+function scriptedCursor(models: { id: string; params?: { id: string; value: string }[] }[]): CursorSdk {
   return {
     models: [{ id: "composer-a", label: "A" }],
     async create() {
@@ -241,7 +289,7 @@ function scriptedCursor(models: string[]): CursorSdk {
     return {
       agentId: "agent-1",
       async send(prompt: string, options: CursorSendOptions) {
-        models.push(options.model.id);
+        models.push(options.model);
         return {
           async *stream() {
             yield { type: "assistant", message: { content: [{ type: "text", text: prompt }] } };

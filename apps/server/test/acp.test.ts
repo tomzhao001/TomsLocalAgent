@@ -331,6 +331,54 @@ describe("ACP 计划与权限", () => {
     expect(link.calls.map((call) => call.method)).toEqual(["session/new"]);
   });
 
+  it("模型参数写到同名配置项，已经相同或没有的项跳过", async () => {
+    const configured = {
+      ...session,
+      modes: {
+        currentModeId: "agent",
+        availableModes: [
+          { id: "agent", name: "Agent" },
+          { id: "ask", name: "Ask" },
+        ],
+      },
+      configOptions: [
+        { id: "model", category: "model", currentValue: "auto" },
+        { id: "effort", currentValue: "low" },
+        { id: "fast", currentValue: "true" },
+      ],
+    };
+    const link = scripted((method) => {
+      if (method === "session/new") return configured;
+      return {};
+    });
+    const runtime = createAcpRuntime(async () => link);
+    const result = await collect(runtime, {
+      sessionId: "s",
+      runId: "r",
+      workspaceId: "w",
+      prompt: "看看",
+      model: "composer",
+      modelParams: [
+        { id: "effort", value: "high" },
+        { id: "fast", value: "true" },
+        { id: "context", value: "1m" },
+      ],
+      cwd: "/",
+      access: "chat",
+      chatMode: "agent",
+    });
+    expect(result.status).toBe("finished");
+    expect(link.calls.map((call) => call.method)).toEqual([
+      "session/new",
+      "session/set_mode",
+      "session/set_config_option",
+      "session/set_config_option",
+      "session/prompt",
+    ]);
+    expect(link.calls[2]?.params).toMatchObject({ configId: "model", value: "composer" });
+    expect(link.calls[3]?.params).toMatchObject({ configId: "effort", value: "high" });
+  });
+
   it("聊天走 ACP，工作流仍走 SDK", async () => {
     const seen: string[] = [];
     const runtime = routeCursorRuntime(mark("sdk", seen), mark("acp", seen));

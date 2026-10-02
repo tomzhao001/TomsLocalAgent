@@ -1,13 +1,23 @@
-import { GitBranchPlus, RefreshCw, TriangleAlert } from "lucide-react";
+import { GitBranchPlus, Maximize2, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode, type UIEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { SplitDialog } from "@/components/workflow/SplitDialog";
 import { readonlyViolation, type LogEvent, type PlanDocument, type PlanTodo } from "@/lib/api";
 import { appendLogEvent, todoLabel, type ChatBubble } from "./chat-log";
+import {
+  defaultModelParams,
+  modelSummary,
+  normalizeModelParams,
+  pickModelId,
+  type ModelInfo,
+  type ModelParam,
+} from "./model-choice";
 
 type Session = {
   id: string;
@@ -18,7 +28,6 @@ type Session = {
   created_at?: number | null;
 };
 type RunRow = { id: string; status: string; prompt: string | null };
-type ModelInfo = { id: string; label: string };
 type Bubble = ChatBubble;
 
 const providerLabels: Record<string, string> = { cursor: "Cursor", opencode: "OpenCode" };
@@ -58,8 +67,13 @@ export function ChatPage({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [model, setModel] = useState("");
-  const [chatMode, setChatMode] = useState<"ask" | "plan" | "agent">("agent");
+  const [selection, setSelection] = useState<{ id: string; params: ModelParam[] }>({ id: "", params: [] });
+  const [chatMode, setChatMode] = useState<"ask" | "agent">("agent");
+  const [modelOpen, setModelOpen] = useState(false);
+  const [draftId, setDraftId] = useState("");
+  const [draftParams, setDraftParams] = useState<ModelParam[]>([]);
+  const [expandOpen, setExpandOpen] = useState(false);
+  const [draftPrompt, setDraftPrompt] = useState("");
   const [modelError, setModelError] = useState("");
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
@@ -126,17 +140,14 @@ export function ChatPage({
         if (cancelled) return;
         const listed = withChatModel(items, chatModel);
         setModels(listed);
-        setModel((current) => {
-          if (current && listed.some((item) => item.id === current)) return current;
-          if (chatModel) return chatModel;
-          return listed.find((item) => item.id === "auto")?.id ?? listed[0]?.id ?? "";
-        });
+        setSelection((current) => chooseSelection(listed, current, chatModel));
         if (listed.length === 0) setModelError("暂无模型");
       })
       .catch((reason: unknown) => {
         if (cancelled) return;
-        setModels(chatModel ? [{ id: chatModel, label: chatModel }] : []);
-        setModel(chatModel);
+        const listed = chatModel ? [{ id: chatModel, label: chatModel }] : [];
+        setModels(listed);
+        setSelection(chooseSelection(listed, { id: "", params: [] }, chatModel));
         if (!chatModel) setModelError(reason instanceof Error ? reason.message : "模型列表读取失败");
       });
     return () => {
@@ -263,7 +274,7 @@ export function ChatPage({
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!sessionId || !model) return;
+    if (!sessionId || !selection.id) return;
     setError("");
     const text = String(new FormData(event.currentTarget).get("prompt") ?? "");
     const seq = loadSeq.current;
@@ -271,7 +282,12 @@ export function ChatPage({
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt: text, model, ...(activeProvider === "cursor" ? { mode: chatMode } : {}) }),
+      body: JSON.stringify({
+        prompt: text,
+        model: selection.id,
+        ...(selection.params.length ? { params: selection.params } : {}),
+        ...(activeProvider === "cursor" ? { mode: chatMode } : {}),
+      }),
     });
     const body = (await res.json()) as { runId?: string; message?: string };
     if (seq !== loadSeq.current) return;
@@ -385,19 +401,34 @@ export function ChatPage({
             </div>
           </div>
           <form className="flex shrink-0 flex-col gap-2" onSubmit={(event) => void send(event)}>
-            <Textarea
-              name="prompt"
-              value={prompt}
-              placeholder="输入消息"
-              className="max-h-40 overflow-y-auto"
-              onChange={(e) => setPrompt(e.target.value)}
-            />
+            <div className="relative">
+              <Textarea
+                name="prompt"
+                value={prompt}
+                placeholder="输入消息"
+                className="max-h-40 overflow-y-auto pr-9"
+                onChange={(e) => setPrompt(e.target.value)}
+              />
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                className="absolute top-1 right-1"
+                aria-label="放大输入"
+                onClick={() => {
+                  setDraftPrompt(prompt);
+                  setExpandOpen(true);
+                }}
+              >
+                <Maximize2 />
+              </Button>
+            </div>
             <div className="flex items-center justify-end gap-2">
               {activeProvider === "cursor" ? (
                 <Select
                   value={chatMode}
                   onValueChange={(value) => {
-                    if (value === "plan" || value === "agent" || value === "ask") setChatMode(value);
+                    if (value === "agent" || value === "ask") setChatMode(value);
                   }}
                 >
                   <SelectTrigger className="w-28" aria-label="对话方式">
@@ -406,39 +437,80 @@ export function ChatPage({
                   <SelectContent>
                     <SelectItem value="agent">Agent</SelectItem>
                     <SelectItem value="ask">Ask</SelectItem>
-                    <SelectItem value="plan">Plan</SelectItem>
                   </SelectContent>
                 </Select>
               ) : null}
-              <Select
-                value={model}
-                onValueChange={(value) => {
-                  if (value) setModel(value);
-                }}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="max-w-72"
+                aria-label="模型"
                 disabled={models.length === 0}
+                onClick={() => {
+                  setDraftId(selection.id);
+                  setDraftParams(selection.params);
+                  setModelOpen(true);
+                }}
               >
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="暂无模型" />
-                </SelectTrigger>
-                <SelectContent>
-                  {models.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <span className="truncate">{modelSummary(models.find((item) => item.id === selection.id), selection.params)}</span>
+              </Button>
               {activeRunId ? (
                 <Button type="button" variant="outline" onClick={() => void stop()}>
                   终止
                 </Button>
               ) : (
-                <Button type="submit" disabled={!sessionId || !model}>
+                <Button type="submit" disabled={!sessionId || !selection.id}>
                   发送
                 </Button>
               )}
             </div>
           </form>
+          <ModelDialog
+            open={modelOpen}
+            models={models}
+            draftId={draftId}
+            draftParams={draftParams}
+            onOpenChange={setModelOpen}
+            onModel={(id) => {
+              setDraftId(id);
+              setDraftParams(defaultModelParams(models.find((item) => item.id === id)));
+            }}
+            onParam={(id, value) => {
+              setDraftParams((current) => current.map((item) => (item.id === id ? { id, value } : item)));
+            }}
+            onApply={() => {
+              setSelection({ id: draftId, params: draftParams });
+              setModelOpen(false);
+            }}
+          />
+          <Dialog open={expandOpen} onOpenChange={setExpandOpen}>
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>编辑消息</DialogTitle>
+              </DialogHeader>
+              <Textarea
+                aria-label="放大后的消息"
+                value={draftPrompt}
+                className="max-h-[70vh] min-h-[50vh]"
+                onChange={(event) => setDraftPrompt(event.target.value)}
+              />
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setExpandOpen(false)}>
+                  取消
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setPrompt(draftPrompt);
+                    setExpandOpen(false);
+                  }}
+                >
+                  确定
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           {modelError ? (
             <Alert>
               <AlertDescription>{modelError}</AlertDescription>
@@ -494,6 +566,89 @@ function ChatToolbar({
 function withChatModel(items: ModelInfo[], chatModel: string): ModelInfo[] {
   if (!chatModel || items.some((item) => item.id === chatModel)) return items;
   return [{ id: chatModel, label: chatModel }, ...items];
+}
+
+function chooseSelection(listed: ModelInfo[], current: { id: string; params: ModelParam[] }, chatModel: string) {
+  const id = pickModelId(listed, current.id, chatModel);
+  const model = listed.find((item) => item.id === id);
+  const params = current.id === id ? normalizeModelParams(model, current.params) : defaultModelParams(model);
+  return { id, params };
+}
+
+function ModelDialog({
+  open,
+  models,
+  draftId,
+  draftParams,
+  onOpenChange,
+  onModel,
+  onParam,
+  onApply,
+}: {
+  open: boolean;
+  models: ModelInfo[];
+  draftId: string;
+  draftParams: ModelParam[];
+  onOpenChange: (open: boolean) => void;
+  onModel: (id: string) => void;
+  onParam: (id: string, value: string) => void;
+  onApply: () => void;
+}) {
+  const selected = models.find((item) => item.id === draftId);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>模型</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3">
+          <div className="grid gap-2">
+            <Label>模型</Label>
+            <Select value={draftId} onValueChange={(value) => { if (value) onModel(value); }}>
+              <SelectTrigger aria-label="选择模型">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {models.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {(selected?.parameters ?? []).map((param) => (
+            <div key={param.id} className="grid gap-2">
+              <Label>{param.label}</Label>
+              <Select
+                value={draftParams.find((item) => item.id === param.id)?.value ?? ""}
+                onValueChange={(value) => { if (value) onParam(param.id, value); }}
+              >
+                <SelectTrigger aria-label={param.label}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {param.values.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button type="button" onClick={onApply}>
+            确定
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function PlanCard({ plan }: { plan: PlanDocument }) {
