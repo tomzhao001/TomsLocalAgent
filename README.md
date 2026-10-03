@@ -62,7 +62,7 @@ Windows（在 Windows 上运行）：
 .\scripts\package-windows.ps1
 ```
 
-输出 `dist\TomsGateway-<版本>-win-x64\`。加上 `-Zip` 才额外生成同名 zip。
+输出 `dist\TomsGateway-<版本>-win-x64\`。加上 `-Zip` 才额外生成同名 zip。加上 `-Start` 会在打包完成后运行输出目录里的 `windows\install-service.ps1`，把服务切到这次打好的包并重新启动。若当前服务的工作目录已经是这个输出目录，会先停掉它再打包，避免文件被占用。
 
 macOS（在 Mac 上运行，架构按 `uname -m` 自动选择 arm64 或 x64）：
 
@@ -70,7 +70,7 @@ macOS（在 Mac 上运行，架构按 `uname -m` 自动选择 arm64 或 x64）�
 ./scripts/package-macos.sh
 ```
 
-输出 `dist/TomsGateway-<版本>-darwin-<arch>/`。加上 `--tar` 才额外生成同名 tar.gz。
+输出 `dist/TomsGateway-<版本>-darwin-<arch>/`。加上 `--tar` 才额外生成同名 tar.gz。加上 `--start` 会在打包完成后运行输出目录里的 `macos/install-service.sh`，把服务切到这次打好的包并重新启动。若当前服务的工作目录已经是这个输出目录，会先停掉它再打包。
 
 两个脚本都可以加 `-SkipInstall` / `--skip-install` 跳过 `pnpm install`。打包时会把本机用户数据目录里的 `gateway.env` 复制进输出目录；这个文件不存在就会失败。
 

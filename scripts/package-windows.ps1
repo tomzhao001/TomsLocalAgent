@@ -1,6 +1,7 @@
 ﻿# 在 Windows 上打包 TomsGateway，输出 dist\TomsGateway-<版本>-win-x64\。
 # 加上 -Zip 才额外生成同名 zip。-SkipInstall 跳过 pnpm install。
-param([switch]$SkipInstall, [switch]$Zip)
+# 加上 -Start 会在打包完成后运行输出目录里的 install-service.ps1。
+param([switch]$SkipInstall, [switch]$Zip, [switch]$Start)
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -11,6 +12,12 @@ function Invoke-Step {
   Write-Host "==> $Title"
   & $Block
   if ($LASTEXITCODE -ne 0) { throw "失败：$Title" }
+}
+
+function Get-NormalizedPath {
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
+  return [System.IO.Path]::GetFullPath($Path).TrimEnd('\').ToLowerInvariant()
 }
 
 $NodeVersion = (Get-Content -LiteralPath "scripts\node-version.txt" -Raw).Trim()
@@ -25,6 +32,16 @@ Invoke-Step "构建 shared" { pnpm --filter @gateway/shared build }
 Invoke-Step "构建 server" { pnpm --filter @gateway/server build }
 Invoke-Step "构建 web" { pnpm --filter @gateway/web build }
 
+if ($Start) {
+  $task = Get-ScheduledTask -TaskName "TomsGateway" -ErrorAction SilentlyContinue
+  $wd = $null
+  if ($task -and $task.Actions) { $wd = @($task.Actions)[0].WorkingDirectory }
+  if ((Get-NormalizedPath $wd) -eq (Get-NormalizedPath $Stage)) {
+    Write-Host "==> 停止占用输出目录的服务"
+    & (Join-Path $Root "packaging\windows\stop.ps1")
+    Start-Sleep -Seconds 1
+  }
+}
 if (Test-Path -LiteralPath $Stage) { Remove-Item -LiteralPath $Stage -Recurse -Force }
 Invoke-Step "生成生产依赖" { pnpm --filter @gateway/server deploy --prod --config.node-linker=hoisted "dist/$Name/app" }
 
@@ -77,4 +94,9 @@ if ($Zip) {
   [System.IO.Compression.ZipFile]::CreateFromDirectory($Stage, $zipOut, [System.IO.Compression.CompressionLevel]::Optimal, $true)
   $sizeMb = [math]::Round((Get-Item -LiteralPath $zipOut).Length / 1MB, 1)
   Write-Host "已生成：$zipOut（$sizeMb MB）"
+}
+if ($Start) {
+  Write-Host "==> 安装并启动服务"
+  & (Join-Path $Stage "windows\install-service.ps1")
+  if ($LASTEXITCODE -ne 0) { throw "失败：安装并启动服务" }
 }

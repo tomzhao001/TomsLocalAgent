@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 在 macOS 上打包 TomsGateway，输出 dist/TomsGateway-<版本>-darwin-<arch>/。
 # 加上 --tar 才额外生成同名 tar.gz。--skip-install 跳过 pnpm install。
+# 加上 --start 会在打包完成后运行输出目录里的 install-service.sh。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,10 +9,12 @@ cd "$ROOT"
 
 SKIP_INSTALL=0
 MAKE_TAR=0
+START=0
 for arg in "$@"; do
   case "$arg" in
     --skip-install) SKIP_INSTALL=1 ;;
     --tar) MAKE_TAR=1 ;;
+    --start) START=1 ;;
     *) echo "未知参数：${arg}" >&2; exit 1 ;;
   esac
 done
@@ -42,6 +45,23 @@ echo "==> 构建 shared、server、web"
 pnpm --filter @gateway/shared build
 pnpm --filter @gateway/server build
 pnpm --filter @gateway/web build
+
+if [[ "$START" -eq 1 ]]; then
+  PLIST="$HOME/Library/LaunchAgents/com.toms.gateway.plist"
+  if [[ -f "$PLIST" ]]; then
+    WD="$(/usr/libexec/PlistBuddy -c 'Print :WorkingDirectory' "$PLIST" 2>/dev/null || true)"
+    WD="${WD%/}"
+    STAGE_CMP="${STAGE%/}"
+    if [[ -n "$WD" && -d "$WD" && -d "$STAGE_CMP" ]]; then
+      WD="$(cd "$WD" && pwd)"
+      STAGE_CMP="$(cd "$STAGE_CMP" && pwd)"
+    fi
+    if [[ -n "$WD" && "$WD" == "$STAGE_CMP" ]]; then
+      echo "==> 停止占用输出目录的服务"
+      "$ROOT/packaging/macos/stop.sh"
+    fi
+  fi
+fi
 
 rm -rf "$STAGE"
 echo "==> 生成生产依赖"
@@ -86,4 +106,8 @@ if [[ "$MAKE_TAR" -eq 1 ]]; then
   rm -f "$ROOT/dist/$NAME.tar.gz"
   tar -czf "$ROOT/dist/$NAME.tar.gz" -C "$ROOT/dist" "$NAME"
   echo "已生成：$ROOT/dist/$NAME.tar.gz"
+fi
+if [[ "$START" -eq 1 ]]; then
+  echo "==> 安装并启动服务"
+  "$STAGE/macos/install-service.sh"
 fi
