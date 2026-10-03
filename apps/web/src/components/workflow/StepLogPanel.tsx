@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -92,7 +93,7 @@ export function StepLogPanel({ runs, planRuns = [] }: { runs: StepRun[]; planRun
                 <DialogTitle>Plan</DialogTitle>
                 <DialogDescription className="sr-only">这一轮对应的计划</DialogDescription>
               </DialogHeader>
-              <p className="min-w-0 text-xs leading-5 wrap-break-word whitespace-pre-wrap">{plan}</p>
+              {plan ? <Markdown text={plan} /> : null}
             </DialogContent>
           </Dialog>
         </>

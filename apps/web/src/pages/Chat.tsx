@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type Reac
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Markdown } from "@/components/Markdown";
 import { ModelDialog } from "@/components/ModelDialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -389,20 +390,20 @@ export function ChatPage({
                     </summary>
                     {bubble.detail ? <p className="whitespace-pre-wrap">{bubble.detail}</p> : null}
                   </details>
-                ) : bubble.role === "done" ? null : (
+                ) : bubble.role === "done" ? null : bubble.role === "assistant" ? (
+                  <Markdown key={index} text={bubble.text} />
+                ) : bubble.role === "user" ? (
                   <p
                     key={index}
-                    className={
-                      bubble.role === "user"
-                        ? "ml-auto max-w-[80%] rounded-2xl bg-primary px-3 py-2 text-sm leading-6 whitespace-pre-wrap text-primary-foreground"
-                        : bubble.role === "error"
-                          ? "mr-auto max-w-[80%] text-sm leading-6 whitespace-pre-wrap text-destructive"
-                          : "mr-auto max-w-[80%] rounded-2xl bg-muted px-3 py-2 text-sm leading-6 whitespace-pre-wrap"
-                    }
+                    className="ml-auto max-w-[80%] rounded-2xl bg-primary px-3 py-2 text-sm leading-6 whitespace-pre-wrap text-primary-foreground"
                   >
                     {bubble.text}
                   </p>
-                ),
+                ) : bubble.role === "error" ? (
+                  <p key={index} className="mr-auto max-w-[80%] text-sm leading-6 whitespace-pre-wrap text-destructive">
+                    {bubble.text}
+                  </p>
+                ) : null,
               )}
               {activeRunId ? <p className="animate-pulse text-xs text-muted-foreground">正在处理…</p> : null}
             </div>
