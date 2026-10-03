@@ -1,4 +1,4 @@
-import { GitBranchPlus, Maximize2, RefreshCw, TriangleAlert } from "lucide-react";
+import { GitBranchPlus, Loader2, Maximize2, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode, type UIEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -68,6 +68,7 @@ export function ChatPage({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [selection, setSelection] = useState<{ id: string; params: ModelParam[] }>({ id: "", params: [] });
   const [chatMode, setChatMode] = useState<"ask" | "agent">("agent");
   const [modelOpen, setModelOpen] = useState(false);
@@ -128,6 +129,7 @@ export function ChatPage({
   useEffect(() => {
     let cancelled = false;
     setModelError("");
+    setModelsLoading(true);
     void fetch(`/api/providers/${activeProvider}/models`, { credentials: "include" })
       .then(async (res) => {
         const body = (await res.json().catch(() => ({}))) as ModelInfo[] | { message?: string };
@@ -151,6 +153,9 @@ export function ChatPage({
         setModels(listed);
         setSelection(chooseSelection(listed, { id: "", params: [] }, chatModel));
         if (!storedId) setModelError(reason instanceof Error ? reason.message : "模型列表读取失败");
+      })
+      .finally(() => {
+        if (!cancelled) setModelsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -347,7 +352,7 @@ export function ChatPage({
               disabled={!sessionId || refreshing}
               onClick={() => void refresh()}
             >
-              <RefreshCw />
+              <RefreshCw className={refreshing ? "animate-spin" : ""} />
             </Button>
           </CardAction>
         </CardHeader>
@@ -448,14 +453,21 @@ export function ChatPage({
                 variant="outline"
                 className="max-w-72"
                 aria-label="模型"
-                disabled={models.length === 0}
+                disabled={modelsLoading || models.length === 0}
                 onClick={() => {
                   setDraftId(selection.id);
                   setDraftParams(selection.params);
                   setModelOpen(true);
                 }}
               >
-                <span className="truncate">{modelSummary(models.find((item) => item.id === selection.id), selection.params)}</span>
+                {modelsLoading ? (
+                  <>
+                    <Loader2 className="animate-spin" data-icon="inline-start" />
+                    加载模型…
+                  </>
+                ) : (
+                  <span className="truncate">{modelSummary(models.find((item) => item.id === selection.id), selection.params)}</span>
+                )}
               </Button>
               {activeRunId ? (
                 <Button type="button" variant="outline" onClick={() => void stop()}>

@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { ModelDialog } from "@/components/ModelDialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -30,6 +30,7 @@ type Workspace = {
 export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   const [items, setItems] = useState<Workspace[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
@@ -47,13 +48,21 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   }
 
   useEffect(() => {
+    let cancelled = false;
     void load();
+    setModelsLoading(true);
     void fetch("/api/providers/cursor/models", { credentials: "include" })
       .then(async (res) => {
         const body = (await res.json().catch(() => [])) as ModelInfo[];
-        if (res.ok && Array.isArray(body)) setModels(body);
+        if (!cancelled && res.ok && Array.isArray(body)) setModels(body);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setModelsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function browse() {
@@ -186,7 +195,7 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <p className="text-muted-foreground">仓库：{item.repos.length === 0 ? "无" : item.repos.join("，")}</p>
-              <ModelFields item={item} models={models} onError={setError} onSaved={() => void reload()} />
+              <ModelFields item={item} models={models} modelsLoading={modelsLoading} onError={setError} onSaved={() => void reload()} />
             </CardContent>
             <CardFooter className="gap-2">
               <Button type="button" size="sm" variant="outline" onClick={() => void rename(item)}>
@@ -212,11 +221,13 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
 function ModelFields({
   item,
   models,
+  modelsLoading,
   onError,
   onSaved,
 }: {
   item: Workspace;
   models: ModelInfo[];
+  modelsLoading: boolean;
   onError: (message: string) => void;
   onSaved: () => void;
 }) {
@@ -252,11 +263,12 @@ function ModelFields({
 
   return (
     <form className="grid gap-3 sm:grid-cols-3" onSubmit={(event) => void save(event)}>
-      <ModelField label="聊天默认模型" value={chatModel} models={models} onChange={setChatModel} />
-      <ModelField label="工作流开发默认模型" value={developModel} models={models} onChange={setDevelopModel} />
+      <ModelField label="聊天默认模型" value={chatModel} models={models} loading={modelsLoading} onChange={setChatModel} />
+      <ModelField label="工作流开发默认模型" value={developModel} models={models} loading={modelsLoading} onChange={setDevelopModel} />
       <div className="grid gap-2 sm:col-span-2 sm:grid-cols-[1fr_auto] sm:items-end">
-        <ModelField label="工作流 Review 默认模型" value={reviewModel} models={models} onChange={setReviewModel} />
+        <ModelField label="工作流 Review 默认模型" value={reviewModel} models={models} loading={modelsLoading} onChange={setReviewModel} />
         <Button type="submit" size="sm" variant="outline" disabled={saving}>
+          {saving ? <Loader2 className="animate-spin" data-icon="inline-start" /> : null}
           保存模型
         </Button>
       </div>
@@ -268,11 +280,13 @@ function ModelField({
   label,
   value,
   models,
+  loading,
   onChange,
 }: {
   label: string;
   value: string;
   models: ModelInfo[];
+  loading: boolean;
   onChange: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -301,10 +315,17 @@ function ModelField({
           variant="outline"
           className="min-w-0 flex-1 justify-start"
           aria-label={label}
-          disabled={models.length === 0}
+          disabled={loading || models.length === 0}
           onClick={openDialog}
         >
-          <span className="truncate">{!value || selected ? summary : parsed.id}</span>
+          {loading ? (
+            <>
+              <Loader2 className="animate-spin" data-icon="inline-start" />
+              加载模型…
+            </>
+          ) : (
+            <span className="truncate">{!value || selected ? summary : parsed.id}</span>
+          )}
         </Button>
         <Button type="button" size="icon" variant="ghost" aria-label={`清空${label}`} disabled={!value} onClick={() => onChange("")}>
           <X />

@@ -134,7 +134,7 @@ describe("聊天页", () => {
     vi.stubGlobal("EventSource", class { close() {} });
     render(<ChatPage workspaceId="ws" chatModel="composer" onSplitStarted={() => {}} />);
     const summary = await screen.findByRole("button", { name: "模型" });
-    expect(summary.textContent).toContain("Composer 2.5 · 200k · high · Fast");
+    await waitFor(() => expect(summary.textContent).toContain("Composer 2.5 · 200k · high · Fast"));
     fireEvent.click(summary);
     fireEvent.pointerDown(screen.getByRole("combobox", { name: "上下文" }), {
       button: 0,

@@ -54,7 +54,7 @@ export function LogView({ url, running, scroll = true }: { url: string; running:
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">{running ? "运行中，每 10 秒自动刷新" : "已结束"}</span>
         <Button type="button" size="icon-xs" variant="ghost" aria-label="刷新日志" disabled={loading} onClick={() => void load()}>
-          <RefreshCw />
+          <RefreshCw className={loading ? "animate-spin" : ""} />
         </Button>
       </div>
       {scroll ? <ScrollArea className="max-h-80 min-w-0 overflow-x-hidden rounded-lg border">{body}</ScrollArea> : body}

@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Handle, Position, ReactFlow, type BuiltInEdge, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -18,7 +19,7 @@ const stateLabels: Record<StepState, string> = {
 const stateClasses: Record<StepState, string> = {
   idle: "border-border bg-background text-muted-foreground",
   queued: "border-sky-400 bg-sky-50",
-  running: "border-emerald-500 bg-emerald-50 animate-pulse",
+  running: "border-emerald-500 bg-emerald-50",
   passed: "border-emerald-500/60 bg-background",
   rejected: "border-orange-400 bg-orange-50",
   error: "border-destructive bg-destructive/5",
@@ -48,20 +49,25 @@ type StepFlowNode = Node<StepNodeData, "step">;
 
 function StepNode({ data }: NodeProps<StepFlowNode>) {
   return (
-    <div
-      className={`w-64 cursor-pointer rounded-lg border-2 px-3 py-2 text-sm ${stateClasses[data.state]} ${data.selected ? "ring-2 ring-ring/50" : ""}`}
-    >
-      <Handle type="target" position={Position.Top} id="top" className="opacity-0" />
-      <Handle type="target" position={Position.Right} id="right-in" className="opacity-0" />
-      <Handle type="source" position={Position.Right} id="right-out" style={{ top: "70%" }} className="opacity-0" />
-      <div className="flex items-center justify-between gap-2">
-        <strong>{stepLabels[data.step]}</strong>
-        <span className="text-xs">
-          {stateLabels[data.state]}
-          {data.attempts > 0 ? ` · ${data.attempts} 轮` : ""}
-        </span>
+    <div className="relative w-64">
+      {data.state === "running" ? (
+        <Loader2 className="pointer-events-none absolute -top-6 left-1/2 size-4 -translate-x-1/2 animate-spin text-emerald-600" />
+      ) : null}
+      <div
+        className={`cursor-pointer rounded-lg border-2 px-3 py-2 text-sm ${stateClasses[data.state]} ${data.selected ? "ring-2 ring-ring/50" : ""}`}
+      >
+        <Handle type="target" position={Position.Top} id="top" className="opacity-0" />
+        <Handle type="target" position={Position.Right} id="right-in" className="opacity-0" />
+        <Handle type="source" position={Position.Right} id="right-out" style={{ top: "70%" }} className="opacity-0" />
+        <div className="flex items-center justify-between gap-2">
+          <strong>{stepLabels[data.step]}</strong>
+          <span className="text-xs">
+            {stateLabels[data.state]}
+            {data.attempts > 0 ? ` · ${data.attempts} 轮` : ""}
+          </span>
+        </div>
+        <Handle type="source" position={Position.Bottom} id="bottom" className="opacity-0" />
       </div>
-      <Handle type="source" position={Position.Bottom} id="bottom" className="opacity-0" />
     </div>
   );
 }
@@ -90,7 +96,7 @@ export function RequirementFlow(props: {
   const loop = requirement.workflowId !== "cursor-qa";
   const [zoom, setZoom] = useState(zoomCap);
   const steps = workflowSteps[requirement.workflowId] ?? workflowSteps["cursor-dev-loop"];
-  let y = 0;
+  let y = 28;
   const nodes: StepFlowNode[] = steps.map((step) => {
     const state = stepState(requirement, step);
     const node: StepFlowNode = {

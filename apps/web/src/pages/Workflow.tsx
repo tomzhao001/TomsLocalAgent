@@ -1,4 +1,4 @@
-import { GitBranchPlus, Plus, RefreshCw } from "lucide-react";
+import { GitBranchPlus, Loader2, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,6 +21,8 @@ export function WorkflowPage(props: { workspaceId: string; active: boolean; onCh
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyMore, setHistoryMore] = useState(false);
 
   const loadActive = useCallback(async () => {
     try {
@@ -38,6 +40,8 @@ export function WorkflowPage(props: { workspaceId: string; active: boolean; onCh
 
   const loadHistory = useCallback(
     async (more = false) => {
+      const setBusy = more ? setHistoryMore : setHistoryLoading;
+      setBusy(true);
       try {
         const before = more ? history.items.at(-1)?.finishedAt : undefined;
         const page = await api<HistoryPage>(
@@ -50,6 +54,8 @@ export function WorkflowPage(props: { workspaceId: string; active: boolean; onCh
         );
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "读取失败");
+      } finally {
+        setBusy(false);
       }
     },
     [workspaceId, history.items],
@@ -94,9 +100,10 @@ export function WorkflowPage(props: { workspaceId: string; active: boolean; onCh
               variant="ghost"
               className="ml-auto"
               aria-label="刷新已完成"
+              disabled={historyLoading}
               onClick={() => void loadHistory()}
             >
-              <RefreshCw />
+              <RefreshCw className={historyLoading ? "animate-spin" : ""} />
             </Button>
           )}
         </div>
@@ -115,7 +122,8 @@ export function WorkflowPage(props: { workspaceId: string; active: boolean; onCh
             <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">还没有完成的需求卡</p>
           ) : null}
           {history.hasMore ? (
-            <Button type="button" variant="outline" onClick={() => void loadHistory(true)}>
+            <Button type="button" variant="outline" disabled={historyMore} onClick={() => void loadHistory(true)}>
+              {historyMore ? <Loader2 className="animate-spin" data-icon="inline-start" /> : null}
               加载更多
             </Button>
           ) : null}
