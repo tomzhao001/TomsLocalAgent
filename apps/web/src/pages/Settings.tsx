@@ -25,7 +25,16 @@ type Workspace = {
   chatModel?: string;
   developModel?: string;
   reviewModel?: string;
+  cursorSettingSources?: CursorLayer[];
 };
+
+const cursorLayers = [
+  { id: "project", label: "这个仓库的 .cursor/（含 mcp.json）" },
+  { id: "user", label: "本机 ~/.cursor/ 里的用户级 skills 和配置" },
+  { id: "plugins", label: "本机已安装的 Cursor plugins" },
+] as const;
+
+type CursorLayer = (typeof cursorLayers)[number]["id"];
 
 export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   const [items, setItems] = useState<Workspace[]>([]);
@@ -234,13 +243,15 @@ function ModelFields({
   const [chatModel, setChatModel] = useState(item.chatModel ?? "");
   const [developModel, setDevelopModel] = useState(item.developModel ?? "");
   const [reviewModel, setReviewModel] = useState(item.reviewModel ?? "");
+  const [sources, setSources] = useState<CursorLayer[]>(item.cursorSettingSources ?? []);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setChatModel(canonicalStoredModel(models, item.chatModel ?? ""));
     setDevelopModel(canonicalStoredModel(models, item.developModel ?? ""));
     setReviewModel(canonicalStoredModel(models, item.reviewModel ?? ""));
-  }, [item.chatModel, item.developModel, item.reviewModel, models]);
+    setSources(item.cursorSettingSources ?? []);
+  }, [item.chatModel, item.developModel, item.reviewModel, item.cursorSettingSources, models]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -250,7 +261,7 @@ function ModelFields({
       method: "PATCH",
       credentials: "include",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chatModel, developModel, reviewModel }),
+      body: JSON.stringify({ chatModel, developModel, reviewModel, cursorSettingSources: sources }),
     });
     setSaving(false);
     if (!res.ok) {
@@ -272,6 +283,24 @@ function ModelFields({
           保存模型
         </Button>
       </div>
+      <fieldset className="grid gap-2 sm:col-span-3">
+        <legend className="text-sm font-medium">Cursor 配置层</legend>
+        {cursorLayers.map((layer) => (
+          <label key={layer.id} className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={sources.includes(layer.id)}
+              onChange={(event) => {
+                setSources((current) =>
+                  event.target.checked ? [...current, layer.id] : current.filter((item) => item !== layer.id),
+                );
+              }}
+            />
+            <span>{layer.label}</span>
+          </label>
+        ))}
+      </fieldset>
     </form>
   );
 }

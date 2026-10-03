@@ -11,6 +11,7 @@ import {
   type CursorSdk,
   type CursorSendOptions,
 } from "../src/providers/cursor.js";
+import { cursorSdkAgentOptions } from "../src/providers/live.js";
 import { createOpenCodeRuntime } from "../src/providers/opencode.js";
 import { cachedModels, classifyCursorFailure, flattenOpenCodeModels, formatVariantId, mapCursorEvent, mapCursorModels, matchVariant, parseVariantId, resolveStoredModel, takeOpencodePart } from "../src/providers/map.js";
 import type { AgentRuntime } from "../src/runs.js";
@@ -264,6 +265,21 @@ describe("注入的 SDK", () => {
     expect(calls[2]?.send?.mode).toBe("agent");
     expect(calls[2]?.prompt).toBe("看看");
     expect(calls[2]?.send?.model).toEqual({ id: "m" });
+  });
+
+  it("工作区配置层会交给 create 和 resume，空列表不传", async () => {
+    const calls: { kind: "create" | "resume"; options: CursorAgentOptions }[] = [];
+    const runtime = createCursorRuntime(recordingCursor(calls));
+    const base = { sessionId: "s", runId: "r", workspaceId: "w", prompt: "看看", model: "m", cwd: "/", access: "develop" as const };
+    await runtime.startRun({ ...base, settingSources: ["plugins", "user"], agentId: null }, () => {});
+    await runtime.startRun({ ...base, settingSources: [], agentId: "agent-1" }, () => {});
+    expect(calls[0]?.options.settingSources).toEqual(["plugins", "user"]);
+    expect(calls[1]?.options.settingSources).toBeUndefined();
+    expect(cursorSdkAgentOptions("key", calls[0]!.options).local).toEqual({
+      cwd: "/",
+      settingSources: ["plugins", "user"],
+    });
+    expect(cursorSdkAgentOptions("key", calls[1]!.options).local).toEqual({ cwd: "/" });
   });
 
   it("本次发送把模型参数交给 create 和 send", async () => {

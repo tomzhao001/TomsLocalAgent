@@ -1,4 +1,5 @@
 import type { GatewayEvent } from "@gateway/shared";
+import type { CursorSettingSource } from "../cursor-sources.js";
 import type { AgentRuntime, GatewayTool, RunContext } from "../runs.js";
 import { accessForChat, cursorAccess, promptWithRules, withRules, type CursorAccess } from "./access.js";
 import { classifyCursorFailure, mapCursorEvent, modelSelection, type CursorStreamEvent, type ModelInfo, type ModelParam } from "./map.js";
@@ -20,7 +21,13 @@ export type CursorAgent = {
   send: (prompt: string, options: CursorSendOptions) => Promise<CursorRun>;
 };
 
-export type CursorAgentOptions = { cwd: string; model: string; modelParams?: ModelParam[]; access: CursorAccess };
+export type CursorAgentOptions = {
+  cwd: string;
+  model: string;
+  modelParams?: ModelParam[];
+  access: CursorAccess;
+  settingSources?: CursorSettingSource[];
+};
 
 export type CursorSdk = {
   models: ModelInfo[];
@@ -41,6 +48,7 @@ export function createCursorRuntime(sdk: CursorSdk): AgentRuntime {
           cwd: input.cwd,
           model: input.model,
           ...(input.modelParams?.length ? { modelParams: input.modelParams } : {}),
+          ...(input.settingSources?.length ? { settingSources: input.settingSources } : {}),
           access,
         };
         const agent = input.agentId ? await sdk.resume(input.agentId, options) : await sdk.create(options);

@@ -112,6 +112,21 @@ describe("workspace", () => {
     expect(second.json().message).toMatch(/重叠/);
   });
 
+  it("保存 Cursor 配置层，并拒绝未知层", async () => {
+    const root = await start();
+    const path = join(root, "app");
+    await mkdir(path);
+    const created = await authed("POST", "/api/workspaces", { name: "主站", path });
+    expect(created.json().cursorSettingSources).toEqual([]);
+    const id = created.json().id as string;
+    const saved = await authed("PATCH", `/api/workspaces/${id}`, { cursorSettingSources: ["plugins", "user", "user"] });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().cursorSettingSources).toEqual(["user", "plugins"]);
+    const rejected = await authed("PATCH", `/api/workspaces/${id}`, { cursorSettingSources: ["all"] });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().message).toMatch(/project、user、plugins/);
+  });
+
   it("已被聊天引用时不能修改路径，只能改名称", async () => {
     const root = await start();
     const path = join(root, "app");
@@ -134,7 +149,7 @@ describe("workspace", () => {
     });
     expect(renamed.statusCode).toBe(200);
     expect(renamed.json().name).toBe("主站改名");
-    expect(renamed.json()).toMatchObject({ chatModel: "composer", developModel: "gpt", reviewModel: "sonnet" });
+    expect(renamed.json()).toMatchObject({ chatModel: "composer", developModel: "gpt", reviewModel: "sonnet", cursorSettingSources: [] });
     const moved = await authed("PATCH", `/api/workspaces/${id}`, { path: other });
     expect(moved.statusCode).toBe(409);
   });

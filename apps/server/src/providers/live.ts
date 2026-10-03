@@ -69,14 +69,21 @@ export async function loadOpenCodeRuntime(options: { port: number; password?: st
   return { runtime: { ...runtime, listModels }, close: () => server.close() };
 }
 
-function adapt(sdk: any, apiKey: string): CursorSdk {
-  const agentOptions = (options: CursorAgentOptions) => ({
+export function cursorSdkAgentOptions(apiKey: string, options: CursorAgentOptions) {
+  return {
     apiKey,
     model: modelSelection(options.model, options.modelParams),
     mode: options.access.mode,
     ...(options.access.tools ? { tools: options.access.tools } : {}),
-    local: { cwd: options.cwd },
-  });
+    local: {
+      cwd: options.cwd,
+      ...(options.settingSources?.length ? { settingSources: options.settingSources } : {}),
+    },
+  };
+}
+
+function adapt(sdk: any, apiKey: string): CursorSdk {
+  const agentOptions = (options: CursorAgentOptions) => cursorSdkAgentOptions(apiKey, options);
   return {
     models: [],
     async create(options) {

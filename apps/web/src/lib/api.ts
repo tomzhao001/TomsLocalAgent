@@ -7,6 +7,7 @@ export type Workspace = {
   chatModel?: string;
   developModel?: string;
   reviewModel?: string;
+  cursorSettingSources?: Array<"project" | "user" | "plugins">;
 };
 
 export type FlowStatus = "waiting_input" | "running" | "idle";

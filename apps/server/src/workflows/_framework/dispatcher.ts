@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { RequirementCard, RequirementStatus, StepRunStatus } from "@gateway/shared";
+import { settingSourcesOf } from "../../cursor-sources.js";
 import { dbOpen } from "../../db.js";
 import { appendLog } from "../../logs.js";
 import type { WorkspaceLockManager } from "../../locks.js";
@@ -242,9 +243,15 @@ export class Dispatcher {
     const runtime = this.options.runtime();
     if (!runtime) return;
     const workspace = this.db
-      .prepare("SELECT path, repos_json, develop_model, review_model FROM workspaces WHERE id = ?")
+      .prepare("SELECT path, repos_json, develop_model, review_model, cursor_setting_sources FROM workspaces WHERE id = ?")
       .get(row.workspace_id) as
-      | { path: string; repos_json: string; develop_model: string | null; review_model: string | null }
+      | {
+          path: string;
+          repos_json: string;
+          develop_model: string | null;
+          review_model: string | null;
+          cursor_setting_sources: string | null;
+        }
       | undefined;
     if (!workspace) return;
     const card = JSON.parse(row.card_json) as RequirementCard;
@@ -319,6 +326,7 @@ export class Dispatcher {
             model: selection.id,
             ...(selection.params ? { modelParams: selection.params } : {}),
             cwd: workspace.path,
+            ...settingSourcesOf(workspace.cursor_setting_sources),
             access: stepAccess[action.nodeId],
             agentId: keepAgent ? row.agent_id : null,
             onAgent: (agentId) => {

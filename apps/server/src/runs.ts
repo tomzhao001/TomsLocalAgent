@@ -6,6 +6,8 @@ import { dbOpen } from "./db.js";
 import { eventCursor, formatSse, LiveRun, type LiveStatus } from "./live-run.js";
 import { appendLog, logFile, readLog } from "./logs.js";
 import type { WorkspaceLockManager } from "./locks.js";
+import type { CursorSettingSource } from "./cursor-sources.js";
+import { settingSourcesOf } from "./cursor-sources.js";
 import type { AccessProfile } from "./providers/access.js";
 import { readonlyViolation, watchReadonly } from "./providers/guard.js";
 import { parseModelParams, type ModelInfo, type ModelParam } from "./providers/map.js";
@@ -29,6 +31,7 @@ export type RunContext = {
   model: string;
   modelParams?: ModelParam[];
   cwd: string;
+  settingSources?: CursorSettingSource[];
   access?: AccessProfile;
   chatMode?: "ask" | "plan" | "agent";
   agentId?: string | null;
@@ -107,10 +110,12 @@ export function registerRuns(
     const body = request.body as { prompt?: string; model?: string; mode?: string; params?: unknown };
     if (!body.prompt?.trim()) return reply.code(400).send({ error: "invalid", message: "prompt 必填" });
 
-    const workspace = db.prepare("SELECT path, repos_json FROM workspaces WHERE id = ?").get(session.workspace_id) as {
+    const workspace = db.prepare("SELECT path, repos_json, cursor_setting_sources FROM workspaces WHERE id = ?").get(session.workspace_id) as {
       path: string;
       repos_json: string;
+      cursor_setting_sources: string | null;
     };
+    const sources = settingSourcesOf(workspace.cursor_setting_sources);
     const runId = randomUUID();
     const acquired = locks.tryAcquire(session.workspace_id, "chat", { type: "run", id: runId });
     if (!acquired.ok) {
@@ -133,6 +138,7 @@ export function registerRuns(
       model,
       modelParams: parseModelParams(body.params),
       cwd: workspace.path,
+      ...sources,
       access: "chat",
       chatMode: body.mode === "plan" ? "plan" : body.mode === "agent" ? "agent" : "ask",
       agentId: session.agent_id,

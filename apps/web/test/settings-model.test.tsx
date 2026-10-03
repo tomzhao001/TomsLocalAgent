@@ -45,6 +45,7 @@ describe("设置页默认模型", () => {
     });
     fireEvent.click(await screen.findByRole("option", { name: "256k" }));
     fireEvent.click(screen.getByRole("button", { name: "确定" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "本机 ~/.cursor/ 里的用户级 skills 和配置" }));
     fireEvent.click(screen.getByRole("button", { name: "保存模型" }));
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url, init]) => url === "/api/workspaces/ws" && init?.method === "PATCH");
@@ -52,6 +53,7 @@ describe("设置页默认模型", () => {
         chatModel: "grok-4.7[context=256k,reasoning_effort=low,fast=false]",
         developModel: "",
         reviewModel: "",
+        cursorSettingSources: ["user"],
       });
     });
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { DatabaseSync } from "node:sqlite";
+import { formatCursorSettingSources, parseCursorSettingSources } from "./cursor-sources.js";
 import { normalizeWorkspacePath, pathsOverlap, pickDirectory, scanGitRepos } from "./paths.js";
 
 type WorkspaceRow = {
@@ -12,6 +13,7 @@ type WorkspaceRow = {
   chat_model?: string | null;
   develop_model?: string | null;
   review_model?: string | null;
+  cursor_setting_sources?: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -57,6 +59,7 @@ export function registerWorkspaces(
       chatModel?: string;
       developModel?: string;
       reviewModel?: string;
+      cursorSettingSources?: unknown;
     };
     let name = current.name;
     let path = current.path;
@@ -64,6 +67,7 @@ export function registerWorkspaces(
     let chatModel = current.chat_model ?? "";
     let developModel = current.develop_model ?? "";
     let reviewModel = current.review_model ?? "";
+    let settingSources = current.cursor_setting_sources ?? "";
     if (body.name?.trim()) name = body.name.trim();
     if (body.path?.trim()) {
       if (referenceCount(db, id) > 0) {
@@ -79,9 +83,14 @@ export function registerWorkspaces(
     if (typeof body.chatModel === "string") chatModel = body.chatModel.trim();
     if (typeof body.developModel === "string") developModel = body.developModel.trim();
     if (typeof body.reviewModel === "string") reviewModel = body.reviewModel.trim();
+    if (body.cursorSettingSources !== undefined) {
+      const parsed = formatCursorSettingSources(body.cursorSettingSources);
+      if (!parsed.ok) return reply.code(400).send({ error: "invalid", message: parsed.message });
+      settingSources = parsed.stored;
+    }
     db.prepare(
-      "UPDATE workspaces SET name = ?, path = ?, repos_json = ?, chat_model = ?, develop_model = ?, review_model = ?, updated_at = ? WHERE id = ?",
-    ).run(name, path, repos, chatModel, developModel, reviewModel, Date.now(), id);
+      "UPDATE workspaces SET name = ?, path = ?, repos_json = ?, chat_model = ?, develop_model = ?, review_model = ?, cursor_setting_sources = ?, updated_at = ? WHERE id = ?",
+    ).run(name, path, repos, chatModel, developModel, reviewModel, settingSources, Date.now(), id);
     return load(db, id);
   });
 
@@ -192,6 +201,7 @@ function toDto(row: WorkspaceRow) {
     chatModel: row.chat_model ?? "",
     developModel: row.develop_model ?? "",
     reviewModel: row.review_model ?? "",
+    cursorSettingSources: parseCursorSettingSources(row.cursor_setting_sources),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

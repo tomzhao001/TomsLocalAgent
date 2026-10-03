@@ -120,6 +120,7 @@ export function openDatabase(path: string): DatabaseSync {
   ensureColumn(db, "workspaces", "chat_model", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "workspaces", "develop_model", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "workspaces", "review_model", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "workspaces", "cursor_setting_sources", "TEXT NOT NULL DEFAULT ''");
   return db;
 }
 

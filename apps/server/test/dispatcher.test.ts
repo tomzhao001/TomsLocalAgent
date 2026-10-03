@@ -125,6 +125,7 @@ describe("Dispatcher", () => {
     const { ids, locks, dispatcher } = await setup(runtime);
     await tick(dispatcher);
     expect(calls.map((call) => call.access)).toEqual(["plan"]);
+    expect(calls[0]?.settingSources).toBeUndefined();
     expect(calls[0]!.prompt).toContain("TDD");
     expect(row(ids[1]!).status).toBe("pending");
     await tick(dispatcher, 4);
@@ -135,6 +136,14 @@ describe("Dispatcher", () => {
     expect(locks.holder("ws", "workflow")).not.toBeNull();
     await tick(dispatcher);
     expect(locks.holder("ws", "workflow")).toBeNull();
+  });
+
+  it("把 workspace 的配置层传给工作流", async () => {
+    const { runtime, calls } = scripted();
+    const { dispatcher } = await setup(runtime, 1);
+    db.prepare("UPDATE workspaces SET cursor_setting_sources = ? WHERE id = 'ws'").run("project,plugins");
+    await tick(dispatcher);
+    expect(calls[0]?.settingSources).toEqual(["project", "plugins"]);
   });
 
   it("开发和 DevOps 复用同一个 agent，Review 不覆盖它", async () => {

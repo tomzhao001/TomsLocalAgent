@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { RequirementCard } from "@gateway/shared";
+import { settingSourcesOf } from "../../cursor-sources.js";
 import { dbOpen, transaction } from "../../db.js";
 import { appendLog, logFile, readLog } from "../../logs.js";
 import { readonlyViolation, watchReadonly } from "../../providers/guard.js";
@@ -54,8 +55,8 @@ export class SplitRunner {
     | { ok: false; code: number; message: string } {
     const runtime = this.options.runtime();
     if (!runtime) return { ok: false, code: 501, message: "当前没有可用的 Cursor agent" };
-    const workspace = this.db.prepare("SELECT path, repos_json FROM workspaces WHERE id = ?").get(input.workspaceId) as
-      | { path: string; repos_json: string }
+    const workspace = this.db.prepare("SELECT path, repos_json, cursor_setting_sources FROM workspaces WHERE id = ?").get(input.workspaceId) as
+      | { path: string; repos_json: string; cursor_setting_sources: string | null }
       | undefined;
     if (!workspace) return { ok: false, code: 404, message: "workspace 不存在" };
     if (input.chatSessionId) {
@@ -103,6 +104,7 @@ export class SplitRunner {
             prompt,
             model,
             cwd: workspace.path,
+            ...settingSourcesOf(workspace.cursor_setting_sources),
             access: "split",
             agentId: null,
             onAgent: (agentId) => {
