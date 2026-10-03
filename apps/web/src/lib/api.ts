@@ -11,6 +11,20 @@ export type Workspace = {
 
 export type FlowStatus = "waiting_input" | "running" | "idle";
 
+export type GitBranchRef = { name: string; remote: boolean };
+
+export type GitRepo = {
+  path: string;
+  name: string;
+  branch: string;
+  detached: boolean;
+  dirty: boolean;
+  branches: GitBranchRef[];
+  error?: string;
+};
+
+export type GitChange = { path: string; code: string; added: number | null; deleted: number | null };
+
 export type WorkspaceStatus = {
   workspaceId: string;
   status: FlowStatus;
@@ -141,6 +155,16 @@ export const stepLabels: Record<StepId, string> = {
 
 export const rejectLimits = { review: 3 };
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 export async function api<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const res = await fetch(url, {
     method: init?.method ?? "GET",
@@ -149,7 +173,7 @@ export async function api<T>(url: string, init?: { method?: string; body?: unkno
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),
   });
   if (res.status === 204) return undefined as T;
-  const body = (await res.json().catch(() => ({}))) as T & { message?: string };
-  if (!res.ok) throw new Error(body.message ?? "请求失败");
+  const body = (await res.json().catch(() => ({}))) as T & { message?: string; error?: string };
+  if (!res.ok) throw new ApiError(body.message ?? "请求失败", body.error ?? "request_failed", res.status);
   return body;
 }

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { BranchButton, BranchDialog } from "./components/BranchDialog";
 import { StatusDot, WorkspaceSwitcher, attentionOf, sortWorkspaces } from "./components/WorkspaceSwitcher";
 import { api, type Workspace, type WorkspaceStatus } from "./lib/api";
 import { usePolling } from "./lib/usePolling";
@@ -22,6 +23,7 @@ export function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [statuses, setStatuses] = useState<WorkspaceStatus[]>([]);
   const [workspaceId, setWorkspaceId] = useState(() => localStorage.getItem(storageKey) ?? "");
+  const [branchesOpen, setBranchesOpen] = useState(false);
 
   async function refresh() {
     const res = await fetch("/api/me", { credentials: "include" });
@@ -80,7 +82,12 @@ export function App() {
             返回
           </Button>
         ) : workspaces && workspaces.length > 0 ? (
-          <WorkspaceSwitcher workspaces={workspaces} statuses={statuses} value={workspaceId} onChange={selectWorkspace} />
+          <>
+            <WorkspaceSwitcher workspaces={workspaces} statuses={statuses} value={workspaceId} onChange={selectWorkspace} />
+            {workspaces.some((item) => item.id === workspaceId) ? (
+              <BranchButton onClick={() => setBranchesOpen(true)} />
+            ) : null}
+          </>
         ) : null}
         <div className="ml-auto flex items-center gap-2">
           <Button
@@ -88,7 +95,10 @@ export function App() {
             size="icon-sm"
             variant={page === "settings" ? "secondary" : "ghost"}
             aria-label="设置"
-            onClick={() => setPage(page === "settings" ? "workspace" : "settings")}
+            onClick={() => {
+              setBranchesOpen(false);
+              setPage(page === "settings" ? "workspace" : "settings");
+            }}
           >
             <Settings />
           </Button>
@@ -107,6 +117,9 @@ export function App() {
           </Button>
         </div>
       </header>
+      {workspaces?.some((item) => item.id === workspaceId) ? (
+        <BranchDialog open={branchesOpen && page === "workspace"} onOpenChange={setBranchesOpen} workspaceId={workspaceId} />
+      ) : null}
       <main className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-y-auto p-4">
         {page === "settings" ? <SettingsPage onChanged={() => void loadWorkspaces()} /> : null}
         {page === "workspace" && workspaces && workspaces.length === 0 ? (

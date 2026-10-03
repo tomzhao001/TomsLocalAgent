@@ -5,6 +5,7 @@ import fastifyStatic from "@fastify/static";
 import { openDatabase } from "./db.js";
 import { registerAuth } from "./auth.js";
 import { WorkspaceLockManager } from "./locks.js";
+import { registerGitBranches } from "./git.js";
 import { registerWorkspaces } from "./workspaces.js";
 import { createFakeRuntime, recoverInterruptedRuns, registerRuns, type AgentRuntime } from "./runs.js";
 import { registerWorkflows } from "./workflows.js";
@@ -70,6 +71,7 @@ export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
       cookieSecure: options.cookieSecure !== false,
     });
     await registerWorkspaces(app, db, { pickDirectory: options.pickDirectory });
+    registerGitBranches(app, db);
     registerRuns(app, db, { logDir, locks, runtime, runtimes: options.runtimes });
     registerWorkflows(app, db, { logDir, dispatcher, splits });
     dispatcher.start();

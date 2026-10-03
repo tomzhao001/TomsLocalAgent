@@ -163,7 +163,7 @@ function referenceCount(db: DatabaseSync, id: string): number {
   return Number(row.n);
 }
 
-function runningCount(db: DatabaseSync, id: string): number {
+export function runningCount(db: DatabaseSync, id: string): number {
   const row = db
     .prepare(
       `SELECT (SELECT COUNT(*) FROM runs WHERE workspace_id = ? AND status = 'running')
