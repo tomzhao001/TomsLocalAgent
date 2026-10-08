@@ -122,6 +122,9 @@
   * {
     @apply border-border outline-ring/50;
     }
+  fieldset {
+    min-width: 0;
+    }
   body {
     @apply bg-background text-foreground;
     touch-action: pan-x pan-y;

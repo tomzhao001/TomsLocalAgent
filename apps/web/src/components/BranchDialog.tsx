@@ -246,7 +246,7 @@ export function BranchDialog(props: {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>工作区有未提交改动</DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="wrap-break-word">
               {pending?.name === "." ? "workspace 根目录" : pending?.name} 里有未提交的本地改动。可以先把这些改动全部 stash 起来，再切换到 {pending?.branch}。stash 不会自动应用到新分支，之后需要自己回到原来的分支执行 git stash pop。也可以放弃这次切换。
             </DialogDescription>
           </DialogHeader>

@@ -142,18 +142,18 @@ function RequirementDetail(props: { item: Requirement; readOnly?: boolean; onCha
   const { card } = detail;
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid gap-1 text-xs">
-        <p>
+      <div className="grid min-w-0 gap-1 text-xs wrap-break-word *:min-w-0">
+        <p className="wrap-break-word">
           <span className="text-muted-foreground">目标：</span>
           {card.goal}
         </p>
-        <p className="whitespace-pre-wrap">
+        <p className="wrap-break-word whitespace-pre-wrap">
           <span className="text-muted-foreground">背景：</span>
           {card.context}
         </p>
-        <div>
+        <div className="min-w-0 wrap-break-word">
           <span className="text-muted-foreground">验收标准：</span>
-          <ol className="list-decimal pl-5">
+          <ol className="list-decimal pl-5 wrap-break-word">
             {card.acceptanceCriteria.map((line, index) => (
               <li key={index}>{line}</li>
             ))}

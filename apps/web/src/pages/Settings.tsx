@@ -200,7 +200,7 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
                 {item.name}
                 {item.archived ? "（已归档）" : ""}
               </CardTitle>
-              <CardDescription>{item.path}</CardDescription>
+              <CardDescription className="break-all">{item.path}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <p className="text-muted-foreground">仓库：{item.repos.length === 0 ? "无" : item.repos.join("，")}</p>

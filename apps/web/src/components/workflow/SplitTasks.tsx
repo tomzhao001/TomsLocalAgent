@@ -123,8 +123,8 @@ function DraftEditor(props: { split: SplitTask; draft: NonNullable<SplitTask["dr
           />
         </div>
         {cards.map((card, index) => (
-          <fieldset key={index} className="flex flex-col gap-2 rounded-lg border p-3">
-            <div className="flex items-center gap-2">
+          <fieldset key={index} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
+            <div className="flex min-w-0 items-center gap-2">
               <span className="text-xs text-muted-foreground">#{index + 1}</span>
               <Input aria-label="卡片标题" value={card.title} onChange={(event) => update(index, { title: event.target.value })} />
               <Button

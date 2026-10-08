@@ -39,15 +39,15 @@ export function WorkspaceSwitcher(props: {
   const byId = new Map(props.statuses.map((item) => [item.workspaceId, item]));
   return (
     <Select value={props.value} onValueChange={props.onChange}>
-      <SelectTrigger className="max-w-[55vw] min-w-36" aria-label="切换 Workspace">
+      <SelectTrigger className="w-full min-w-0 max-w-[55vw] sm:w-fit" aria-label="切换 Workspace">
         <SelectValue placeholder="选择 Workspace" />
       </SelectTrigger>
       <SelectContent>
         {sortWorkspaces(props.workspaces, props.statuses).map((item) => (
           <SelectItem key={item.id} value={item.id}>
-            <span className="flex items-center gap-2">
+            <span className="flex min-w-0 items-center gap-2">
               <StatusDot attention={attentionOf(byId.get(item.id))} />
-              <span className="truncate">{item.name}</span>
+              <span className="min-w-0 truncate">{item.name}</span>
             </span>
           </SelectItem>
         ))}

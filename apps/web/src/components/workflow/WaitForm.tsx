@@ -112,21 +112,22 @@ export function WaitForm(props: { wait: WaitInfo; onSubmit: (action: InputAction
         <DialogContent className="max-h-[min(85svh,40rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{waitTitles[wait.kind]}</DialogTitle>
-            <DialogDescription className="whitespace-pre-wrap text-foreground">{wait.message}</DialogDescription>
+            <DialogDescription className="wrap-break-word whitespace-pre-wrap text-foreground">{wait.message}</DialogDescription>
           </DialogHeader>
-          {wait.comments ? <p className="whitespace-pre-wrap text-muted-foreground">补充信息：{wait.comments}</p> : null}
+          {wait.comments ? <p className="wrap-break-word whitespace-pre-wrap text-muted-foreground">补充信息：{wait.comments}</p> : null}
           {questions.map((question) => {
             const picked = pickedOf(selected, question.id);
             return (
-              <fieldset key={question.id} className="flex flex-col gap-2">
-                <legend className="text-sm font-medium">{question.prompt}</legend>
-                <div className="flex flex-wrap gap-1.5">
+              <fieldset key={question.id} className="flex min-w-0 flex-col gap-2">
+                <legend className="wrap-break-word text-sm font-medium">{question.prompt}</legend>
+                <div className="flex min-w-0 flex-wrap gap-1.5">
                   {question.options.map((option) => (
                     <Button
                       key={option.id}
                       type="button"
                       size="sm"
                       variant={picked.includes(option.id) ? "default" : "outline"}
+                      className="inline-block! h-auto max-w-full min-w-0 text-left whitespace-normal! wrap-anywhere"
                       aria-pressed={picked.includes(option.id)}
                       onClick={() => toggle(question, option.id)}
                     >
@@ -137,6 +138,7 @@ export function WaitForm(props: { wait: WaitInfo; onSubmit: (action: InputAction
                     type="button"
                     size="sm"
                     variant={picked.includes(otherId) ? "default" : "outline"}
+                    className="inline-block! h-auto max-w-full min-w-0 text-left whitespace-normal! wrap-anywhere"
                     aria-pressed={picked.includes(otherId)}
                     onClick={() => toggle(question, otherId)}
                   >

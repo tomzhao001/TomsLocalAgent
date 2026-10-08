@@ -153,7 +153,7 @@ export function RequirementFlow(props: {
         ];
 
   return (
-    <div ref={frame} className="w-full" style={{ height: (y + 24) * zoom }}>
+    <div ref={frame} className="w-full min-w-0 overflow-hidden" style={{ height: (y + 24) * zoom }}>
       <ReactFlow
         key={`${y}-${zoom}`}
         colorMode="light"

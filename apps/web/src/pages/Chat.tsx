@@ -325,13 +325,13 @@ export function ChatPage({
       : "只读模式：聊天不会修改代码，改代码请转为工作流。";
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col">
-      <Card className="flex min-h-0 flex-1 flex-col">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <Card className="flex min-h-0 min-w-0 flex-1 flex-col">
         <CardHeader className="shrink-0">
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle className="flex min-w-0 items-center gap-2">
             消息
             <Select value={sessionId ?? ""} onValueChange={(id) => { if (id) void openSession(id); }} disabled={recent.length === 0}>
-              <SelectTrigger className="w-72 font-normal" aria-label="最近聊天">
+              <SelectTrigger className="w-full min-w-0 max-w-full flex-1 font-normal sm:max-w-72" aria-label="最近聊天">
                 <SelectValue placeholder="还没有聊天" />
               </SelectTrigger>
               <SelectContent>
@@ -358,8 +358,8 @@ export function ChatPage({
           </CardAction>
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-          <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto rounded-lg border" onScroll={onLogScroll}>
-            <div className="flex flex-col gap-3 p-3">
+          <div ref={logRef} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto rounded-lg border" onScroll={onLogScroll}>
+            <div className="flex min-w-0 flex-col gap-3 p-3">
               {bubbles.map((bubble, index) =>
                 bubble.role === "end" ? (
                   <div key={index} className="flex flex-wrap items-center gap-2">
@@ -379,28 +379,28 @@ export function ChatPage({
                 ) : bubble.role === "plan" ? (
                   <PlanCard key={index} plan={bubble.plan} />
                 ) : bubble.role === "thinking" ? (
-                  <details key={index} className="mr-auto max-w-[80%] text-sm leading-6 text-muted-foreground">
+                  <details key={index} className="mr-auto min-w-0 max-w-[80%] text-sm leading-6 wrap-break-word text-muted-foreground">
                     <summary className="cursor-pointer text-xs">思考</summary>
-                    <p className="whitespace-pre-wrap">{bubble.text}</p>
+                    <p className="wrap-break-word whitespace-pre-wrap">{bubble.text}</p>
                   </details>
                 ) : bubble.role === "tool" ? (
-                  <details key={index} className="mr-auto text-xs leading-5 text-muted-foreground">
+                  <details key={index} className="mr-auto min-w-0 max-w-full text-xs leading-5 wrap-break-word text-muted-foreground">
                     <summary className="cursor-pointer">
                       {bubble.running ? "正在使用" : "已使用"} {bubble.name}
                     </summary>
-                    {bubble.detail ? <p className="whitespace-pre-wrap">{bubble.detail}</p> : null}
+                    {bubble.detail ? <p className="wrap-break-word whitespace-pre-wrap">{bubble.detail}</p> : null}
                   </details>
                 ) : bubble.role === "done" ? null : bubble.role === "assistant" ? (
                   <Markdown key={index} text={bubble.text} />
                 ) : bubble.role === "user" ? (
                   <p
                     key={index}
-                    className="ml-auto max-w-[80%] rounded-2xl bg-primary px-3 py-2 text-sm leading-6 whitespace-pre-wrap text-primary-foreground"
+                    className="ml-auto min-w-0 max-w-[80%] rounded-2xl bg-primary px-3 py-2 text-sm leading-6 wrap-break-word whitespace-pre-wrap text-primary-foreground"
                   >
                     {bubble.text}
                   </p>
                 ) : bubble.role === "error" ? (
-                  <p key={index} className="mr-auto max-w-[80%] text-sm leading-6 whitespace-pre-wrap text-destructive">
+                  <p key={index} className="mr-auto min-w-0 max-w-[80%] text-sm leading-6 wrap-break-word whitespace-pre-wrap text-destructive">
                     {bubble.text}
                   </p>
                 ) : null,
@@ -431,7 +431,7 @@ export function ChatPage({
                 <Maximize2 />
               </Button>
             </div>
-            <div className="flex items-center justify-end gap-2">
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
               {activeProvider === "cursor" ? (
                 <Select
                   value={chatMode}
@@ -452,7 +452,7 @@ export function ChatPage({
                 type="button"
                 size="sm"
                 variant="outline"
-                className="max-w-72"
+                className="min-w-0 max-w-full shrink sm:max-w-72"
                 aria-label="模型"
                 disabled={modelsLoading || models.length === 0}
                 onClick={() => {
@@ -598,10 +598,10 @@ function paramsFor(model: ModelInfo | undefined, params: ModelParam[]): ModelPar
 
 function PlanCard({ plan }: { plan: PlanDocument }) {
   return (
-    <div className="mr-auto flex w-full max-w-[80%] flex-col gap-2 rounded-2xl border px-3 py-2 text-sm leading-6">
+    <div className="mr-auto flex w-full min-w-0 max-w-[80%] flex-col gap-2 rounded-2xl border px-3 py-2 text-sm leading-6 wrap-break-word">
       <p className="font-medium">{plan.name || "计划"}</p>
       {plan.overview ? <p className="text-muted-foreground">{plan.overview}</p> : null}
-      {plan.plan ? <p className="whitespace-pre-wrap">{plan.plan}</p> : null}
+      {plan.plan ? <p className="wrap-break-word whitespace-pre-wrap">{plan.plan}</p> : null}
       <TodoList todos={plan.todos} />
       {plan.phases?.map((phase) => (
         <div key={phase.name} className="flex flex-col gap-1">

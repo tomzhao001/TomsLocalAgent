@@ -74,7 +74,7 @@ export function App() {
 
   return (
     <div className="flex h-svh flex-col overflow-hidden">
-      <header className="flex items-center gap-2 border-b px-4 py-3">
+      <header className="flex min-w-0 items-center gap-2 border-b px-4 py-3">
         <strong className="mr-1 hidden text-sm sm:inline">AI Gateway</strong>
         {page === "settings" ? (
           <Button type="button" size="sm" variant="ghost" onClick={() => setPage("workspace")}>
@@ -89,7 +89,7 @@ export function App() {
             ) : null}
           </>
         ) : null}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <Button
             type="button"
             size="icon-sm"
@@ -120,7 +120,7 @@ export function App() {
       {workspaces?.some((item) => item.id === workspaceId) ? (
         <BranchDialog open={branchesOpen && page === "workspace"} onOpenChange={setBranchesOpen} workspaceId={workspaceId} />
       ) : null}
-      <main className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-y-auto p-4">
+      <main className="mx-auto flex min-h-0 min-w-0 w-full max-w-6xl flex-1 flex-col overflow-x-hidden overflow-y-auto p-4">
         {page === "settings" ? <SettingsPage onChanged={() => void loadWorkspaces()} /> : null}
         {page === "workspace" && workspaces && workspaces.length === 0 ? (
           <Card className="mx-auto w-full max-w-md">
@@ -156,7 +156,7 @@ export function App() {
                 onToolbar={setChatToolbar}
               />
             </TabsContent>
-            <TabsContent value="workflow" forceMount className="flex min-h-0 flex-col overflow-y-auto data-[state=inactive]:hidden">
+            <TabsContent value="workflow" forceMount className="flex min-h-0 min-w-0 flex-col overflow-x-hidden overflow-y-auto data-[state=inactive]:hidden">
               <WorkflowPage
                 key={workspaceId}
                 workspaceId={workspaceId}

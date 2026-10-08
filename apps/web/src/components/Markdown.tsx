@@ -9,6 +9,13 @@ const components: Components = {
   pre({ node: _node, ...props }) {
     return <pre {...props} className={cn("overflow-x-auto", props.className)} />;
   },
+  table({ node: _node, ...props }) {
+    return (
+      <div className="overflow-x-auto">
+        <table {...props} />
+      </div>
+    );
+  },
 };
 
 export function Markdown({ text, className }: { text: string; className?: string }) {
