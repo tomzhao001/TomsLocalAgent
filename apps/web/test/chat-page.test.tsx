@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatPage, cursorChatTitle, pinnedToBottom } from "../src/pages/Chat";
+import { ChatPage, cursorChatTitle, pinnedToBottom, revealTextareaEnd } from "../src/pages/Chat";
 
 afterEach(() => {
   cleanup();
@@ -22,6 +22,16 @@ describe("贴底判断", () => {
     expect(pinnedToBottom(952, 1000, 48)).toBe(true);
     expect(pinnedToBottom(900, 1000, 48)).toBe(false);
     expect(pinnedToBottom(0, 80, 200)).toBe(true);
+  });
+});
+
+describe("输入框滚到最后一行", () => {
+  it("按全文高度撑开，并把视口滚到末尾", () => {
+    const el = document.createElement("textarea");
+    Object.defineProperty(el, "scrollHeight", { value: 400 });
+    revealTextareaEnd(el);
+    expect(el.style.height).toBe("400px");
+    expect(el.scrollTop).toBe(400);
   });
 });
 
@@ -58,11 +68,11 @@ describe("聊天页", () => {
     });
   });
 
-  it("进入时打开最新聊天，默认是 Agent，刷新后展示计划正文和待办", async () => {
+  it("进入时打开最新聊天，默认是 Ask，刷新后展示计划正文和待办", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => response(url)));
     render(<ChatPage workspaceId="ws" onSplitStarted={() => {}} />);
     expect(await screen.findByRole("combobox", { name: "对话方式" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "对话方式" }).textContent).toContain("Agent");
+    expect(screen.getByRole("combobox", { name: "对话方式" }).textContent).toContain("Ask");
     fireEvent.pointerDown(screen.getByRole("combobox", { name: "对话方式" }), {
       button: 0,
       ctrlKey: false,
@@ -71,7 +81,7 @@ describe("聊天页", () => {
     expect(screen.queryByRole("option", { name: "Plan" })).toBeNull();
     expect(screen.getByRole("option", { name: "Ask" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "Agent" })).toBeTruthy();
-    expect(screen.getByText("Agent 会直接修改这个 workspace 里的文件。")).toBeTruthy();
+    expect(screen.getByText("只读模式：聊天不会修改代码，改代码请转为工作流。")).toBeTruthy();
     expect(await screen.findByText("1. 改表单")).toBeTruthy();
     expect(screen.getByText("待办：改表单")).toBeTruthy();
     expect(screen.getByText("登录")).toBeTruthy();
@@ -177,7 +187,7 @@ describe("聊天页", () => {
           { id: "effort", value: "high" },
           { id: "fast", value: "true" },
         ],
-        mode: "agent",
+        mode: "ask",
       });
     });
   });

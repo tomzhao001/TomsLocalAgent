@@ -40,6 +40,12 @@ export function pinnedToBottom(scrollTop: number, scrollHeight: number, clientHe
   return scrollHeight - scrollTop - clientHeight <= threshold;
 }
 
+export function revealTextareaEnd(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+  el.scrollTop = el.scrollHeight;
+}
+
 export function cursorChatTitle(createdAt?: number | null): string {
   if (!createdAt) return "Cursor 聊天";
   const date = new Date(createdAt);
@@ -71,7 +77,7 @@ export function ChatPage({
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [selection, setSelection] = useState<{ id: string; params: ModelParam[] }>({ id: "", params: [] });
-  const [chatMode, setChatMode] = useState<"ask" | "agent">("agent");
+  const [chatMode, setChatMode] = useState<"ask" | "agent">("ask");
   const [modelOpen, setModelOpen] = useState(false);
   const [draftId, setDraftId] = useState("");
   const [draftParams, setDraftParams] = useState<ModelParam[]>([]);
@@ -88,6 +94,7 @@ export function ChatPage({
   const liveEvents = useRef<LogEvent[]>([]);
   const createSessionRef = useRef<() => Promise<void>>(async () => {});
   const logRef = useRef<HTMLDivElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const pinToBottom = useRef(true);
 
   useLayoutEffect(() => {
@@ -95,6 +102,12 @@ export function ChatPage({
     if (!el || !pinToBottom.current) return;
     el.scrollTop = el.scrollHeight;
   }, [bubbles, activeRunId]);
+
+  useLayoutEffect(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    revealTextareaEnd(el);
+  }, [prompt]);
 
   useEffect(() => () => watchStop.current?.(), []);
 
@@ -411,10 +424,11 @@ export function ChatPage({
           <form className="flex shrink-0 flex-col gap-2" onSubmit={(event) => void send(event)}>
             <div className="relative">
               <Textarea
+                ref={promptRef}
                 name="prompt"
                 value={prompt}
                 placeholder="输入消息"
-                className="max-h-40 overflow-y-auto pr-9"
+                className="field-sizing-fixed max-h-40 overflow-anchor-none overflow-y-auto pr-9"
                 onChange={(e) => setPrompt(e.target.value)}
               />
               <Button
