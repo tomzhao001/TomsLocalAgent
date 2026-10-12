@@ -57,6 +57,10 @@ export function permissionChoice(tool: ToolShape, options: PermissionOption[], a
   return match?.optionId ?? null;
 }
 
+export function recallPrompt(history: string, prompt: string): string {
+  return `下面是这条聊天之前的对话记录，原会话已无法恢复，仅供参考：\n\n${history}\n\n---\n\n本次问题：\n${prompt}`;
+}
+
 export function createAcpRuntime(open: () => Promise<AcpLink>): AgentRuntime & { close(): void } {
   let link: AcpLink | null = null;
   let opening: Promise<AcpLink> | null = null;
@@ -296,16 +300,23 @@ async function runTurn(
   try {
     if (signal?.aborted) return "cancelled";
     let opened: unknown = null;
+    let loadFailure = "";
     if (input.agentId) {
       try {
         opened = await current.request("session/load", { sessionId: input.agentId, cwd, mcpServers: [] });
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         if (message.includes("ACP 进程已退出")) throw error;
+        loadFailure = message || "未知错误";
         opened = null;
       }
-      if (!stringOf(asRecord(opened).sessionId)) opened = null;
+      if (!stringOf(asRecord(opened).sessionId)) {
+        loadFailure ||= "没有返回会话";
+        opened = null;
+      }
+      if (loadFailure) console.warn(`ACP 会话 ${input.agentId} 加载失败：${loadFailure}`);
     }
+    const fresh = !opened;
     if (!opened) opened = await current.request("session/new", { cwd, mcpServers: [] });
     const session = asRecord(opened);
     sessionId = stringOf(session.sessionId) ?? "";
@@ -314,6 +325,16 @@ async function runTurn(
       return "error";
     }
     if (sessionId !== input.agentId) input.onAgent?.(sessionId);
+
+    let text = input.prompt;
+    const history = fresh ? (input.history?.() ?? "") : "";
+    if (history) {
+      emit({
+        type: "notice",
+        message: loadFailure ? `原会话加载失败（${loadFailure}），已用最近的聊天记录开启新会话` : "已用最近的聊天记录开启新会话",
+      });
+      text = recallPrompt(history, input.prompt);
+    }
 
     const modes = availableModes(session.modes);
     if (!modes) {
@@ -347,7 +368,7 @@ async function runTurn(
 
     const result = await current.request("session/prompt", {
       sessionId,
-      prompt: [{ type: "text", text: input.prompt }],
+      prompt: [{ type: "text", text }],
     });
     if (signal?.aborted) return "cancelled";
     const stopReason = stringOf(asRecord(result).stopReason);

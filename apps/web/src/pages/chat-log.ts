@@ -1,7 +1,7 @@
 import type { LogEvent, PlanDocument, PlanTodo } from "@/lib/api";
 
 export type ChatBubble =
-  | { role: "user" | "assistant" | "error"; text: string }
+  | { role: "user" | "assistant" | "notice" | "error"; text: string }
   | { role: "thinking"; text: string }
   | { role: "tool"; callId: string; name: string; detail?: string; running: boolean }
   | { role: "plan"; plan: PlanDocument }
@@ -24,6 +24,7 @@ export function appendLogEvent(bubbles: ChatBubble[], event: LogEvent): ChatBubb
   if (event.type === "thinking" && event.text) return appendText(bubbles, "thinking", event.text);
   if (event.type === "tool-start") return applyTool(bubbles, event, true);
   if (event.type === "tool-end") return applyTool(bubbles, event, false);
+  if (event.type === "notice") return [...bubbles, { role: "notice", text: event.message }];
   if (event.type === "error") return [...bubbles, { role: "error", text: event.message }];
   if (event.type === "plan") return [...bubbles, { role: "plan", plan: event.plan }];
   if (event.type === "todos") return applyTodos(bubbles, event.todos);

@@ -412,6 +412,10 @@ export function ChatPage({
                   >
                     {bubble.text}
                   </p>
+                ) : bubble.role === "notice" ? (
+                  <p key={index} className="mr-auto min-w-0 max-w-[80%] text-xs leading-5 wrap-break-word whitespace-pre-wrap text-muted-foreground">
+                    {bubble.text}
+                  </p>
                 ) : bubble.role === "error" ? (
                   <p key={index} className="mr-auto min-w-0 max-w-[80%] text-sm leading-6 wrap-break-word whitespace-pre-wrap text-destructive">
                     {bubble.text}

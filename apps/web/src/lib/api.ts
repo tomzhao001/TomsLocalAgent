@@ -130,6 +130,7 @@ export type LogEvent =
   | { type: "todos"; todos: PlanTodo[] }
   | { type: "usage"; usage: { totalTokens: number } }
   | { type: "done"; status: string }
+  | { type: "notice"; message: string }
   | { type: "error"; message: string };
 
 export const readonlyViolation = "只读运行检测到文件改动";

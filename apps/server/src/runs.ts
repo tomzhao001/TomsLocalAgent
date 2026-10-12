@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { DatabaseSync } from "node:sqlite";
 import type { GatewayEvent } from "@gateway/shared";
+import { chatRecallChars, chatTranscript } from "./chat-history.js";
 import { dbOpen } from "./db.js";
 import { eventCursor, formatSse, LiveRun, type LiveStatus } from "./live-run.js";
 import { appendLog, logFile, readLog } from "./logs.js";
@@ -36,6 +37,7 @@ export type RunContext = {
   chatMode?: "ask" | "plan" | "agent";
   agentId?: string | null;
   onAgent?: (agentId: string) => void;
+  history?: () => string;
   customTools?: Record<string, GatewayTool>;
 };
 
@@ -145,6 +147,7 @@ export function registerRuns(
       onAgent: (agentId) => {
         if (dbOpen(db)) db.prepare("UPDATE chat_sessions SET agent_id = ? WHERE id = ?").run(agentId, session.id);
       },
+      history: () => chatTranscript(db, options.logDir, session.id, { excludeRunId: runId, maxChars: chatRecallChars }),
     };
     const controller = new AbortController();
     controllers.set(runId, controller);

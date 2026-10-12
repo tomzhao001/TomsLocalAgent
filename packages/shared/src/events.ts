@@ -35,6 +35,7 @@ export type GatewayEvent =
   | { type: "todos"; todos: PlanTodo[] }
   | { type: "usage"; usage: TokenUsage }
   | { type: "done"; status: Exclude<RunStatus, "running"> }
+  | { type: "notice"; message: string }
   | { type: "error"; message: string };
 
 export type ProviderId = "cursor" | "opencode";

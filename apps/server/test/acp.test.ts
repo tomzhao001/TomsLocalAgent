@@ -1,7 +1,7 @@
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GatewayEvent } from "@gateway/shared";
-import { acpErrorText, acpInitializeParams, agentCandidates, createAcpRuntime, permissionChoice, routeCursorRuntime, type AcpIncoming, type AcpLink } from "../src/providers/acp.js";
+import { acpErrorText, acpInitializeParams, agentCandidates, createAcpRuntime, permissionChoice, recallPrompt, routeCursorRuntime, type AcpIncoming, type AcpLink } from "../src/providers/acp.js";
 import { mergeTodos } from "../src/providers/plan-doc.js";
 import type { AgentRuntime } from "../src/runs.js";
 const session = {
@@ -299,6 +299,68 @@ describe("ACP 计划与权限", () => {
     expect(result.status).toBe("finished");
     expect(link.calls.map((call) => call.method).slice(0, 2)).toEqual(["session/load", "session/new"]);
     expect(saved).toEqual(["sess-1"]);
+  });
+
+  describe("旧会话加载失败时补回历史", () => {
+    const base = {
+      sessionId: "s",
+      runId: "r",
+      workspaceId: "w",
+      prompt: "继续",
+      model: "auto",
+      cwd: "/",
+      access: "chat" as const,
+      chatMode: "ask" as const,
+      agentId: "agent-old",
+    };
+    const promptText = (link: ScriptedLink) =>
+      (link.calls.find((call) => call.method === "session/prompt")?.params as { prompt: { text: string }[] }).prompt[0]?.text;
+
+    it("提示原因，并把历史拼进新会话的问题", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const link = scripted((method) => {
+        if (method === "session/load") throw new Error("会话不存在");
+        if (method === "session/new") return session;
+        return {};
+      });
+      const history = "用户：一\n\n助手：答一";
+      const result = await collect(createAcpRuntime(async () => link), { ...base, history: () => history });
+      expect(result.status).toBe("finished");
+      expect(link.calls.map((call) => call.method).slice(0, 2)).toEqual(["session/load", "session/new"]);
+      expect(result.events[0]).toEqual({ type: "notice", message: "原会话加载失败（会话不存在），已用最近的聊天记录开启新会话" });
+      expect(promptText(link)).toBe(recallPrompt(history, "继续"));
+      expect(promptText(link)).toContain(history);
+      expect(promptText(link)).toContain("本次问题：\n继续");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("会话不存在"));
+      warn.mockRestore();
+    });
+
+    it("历史为空时问题原样发出，不提示", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const link = scripted((method) => {
+        if (method === "session/load") throw new Error("会话不存在");
+        if (method === "session/new") return session;
+        return {};
+      });
+      const result = await collect(createAcpRuntime(async () => link), { ...base, history: () => "" });
+      warn.mockRestore();
+      expect(result.status).toBe("finished");
+      expect(result.events.filter((event) => event.type === "notice")).toEqual([]);
+      expect(promptText(link)).toBe("继续");
+    });
+
+    it("加载成功时不读历史", async () => {
+      const link = scripted((method) => {
+        if (method === "session/load") return session;
+        return {};
+      });
+      const history = vi.fn(() => "用户：一");
+      const result = await collect(createAcpRuntime(async () => link), { ...base, agentId: "sess-1", history });
+      expect(result.status).toBe("finished");
+      expect(history).not.toHaveBeenCalled();
+      expect(result.events.filter((event) => event.type === "notice")).toEqual([]);
+      expect(promptText(link)).toBe("继续");
+    });
   });
 
   it("按系统查找 agent 可执行文件", () => {

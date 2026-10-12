@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { RequirementCard } from "@gateway/shared";
+import { chatTranscript } from "../../chat-history.js";
 import { settingSourcesOf } from "../../cursor-sources.js";
 import { dbOpen, transaction } from "../../db.js";
-import { appendLog, logFile, readLog } from "../../logs.js";
+import { appendLog } from "../../logs.js";
 import { readonlyViolation, watchReadonly } from "../../providers/guard.js";
 import { latestPlanMarkdown } from "../../providers/plan-doc.js";
 import type { AgentRuntime, GatewayTool } from "../../runs.js";
@@ -82,7 +83,7 @@ export class SplitRunner {
     const file = splitLogFile(this.options.logDir, id);
     const texts: string[] = [];
     const controller = new AbortController();
-    const history = input.chatSessionId ? this.transcript(input.chatSessionId) : "";
+    const history = input.chatSessionId ? chatTranscript(this.db, this.options.logDir, input.chatSessionId) : "";
     const plan = input.chatSessionId ? latestPlanMarkdown(this.db, input.chatSessionId) : "";
     const prompt = [
       splitTemplate,
@@ -228,23 +229,6 @@ export class SplitRunner {
     this.db
       .prepare("UPDATE split_tasks SET status = 'draft', draft_json = ?, error = NULL, updated_at = ? WHERE id = ?")
       .run(JSON.stringify(draft), Date.now(), id);
-  }
-
-  private transcript(sessionId: string): string {
-    const runs = this.db
-      .prepare("SELECT id, prompt FROM runs WHERE session_id = ? ORDER BY created_at")
-      .all(sessionId) as { id: string; prompt: string | null }[];
-    const lines: string[] = [];
-    for (const run of runs) {
-      if (run.prompt) lines.push(`用户：${run.prompt}`);
-      const { events } = readLog(logFile(this.options.logDir, sessionId, run.id), 0);
-      const text = events
-        .filter((event): event is { type: "text"; text: string } => event.type === "text")
-        .map((event) => event.text)
-        .join("");
-      if (text) lines.push(`助手：${text}`);
-    }
-    return lines.join("\n\n");
   }
 }
 

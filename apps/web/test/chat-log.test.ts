@@ -33,6 +33,17 @@ describe("聊天日志折叠", () => {
     expect(bubbles[3]).toMatchObject({ text: "看完" });
   });
 
+  it("提示事件单独成一条，不算错误", () => {
+    const bubbles = [
+      { type: "notice" as const, message: "已用最近的聊天记录开启新会话" },
+      { type: "text" as const, text: "好" },
+    ].reduce(appendLogEvent, []);
+    expect(bubbles).toEqual([
+      { role: "notice", text: "已用最近的聊天记录开启新会话" },
+      { role: "assistant", text: "好" },
+    ]);
+  });
+
   it("结束事件单独成一条，不并进正文", () => {
     const bubbles = [
       { type: "text" as const, text: "好" },
