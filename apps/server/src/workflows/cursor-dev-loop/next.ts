@@ -2,7 +2,7 @@ export type LoopConfig = {
   reviewRejectLimit: number;
 };
 
-export const defaultLoopConfig: LoopConfig = { reviewRejectLimit: 3 };
+export const defaultLoopConfig: LoopConfig = { reviewRejectLimit: 15 };
 
 export type StepId = "plan" | "develop" | "review" | "devops";
 

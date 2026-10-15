@@ -5,7 +5,7 @@ export type WorkflowConfig = {
 
 export const defaultWorkflowConfig: WorkflowConfig = {
   models: { develop: "composer-2.5", review: "composer-2.5", devops: "composer-2.5" },
-  reviewRejectLimit: 3,
+  reviewRejectLimit: 15,
 };
 
 export function snapshotConfig(override: Partial<WorkflowConfig> | null): WorkflowConfig {

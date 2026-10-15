@@ -32,9 +32,8 @@ describe("cursor-dev-loop", () => {
 
   it.each([
     [1, "plan"],
-    [2, "plan"],
-    [3, "plan"],
-    [4, "waiting"],
+    [15, "plan"],
+    [16, "waiting"],
   ] as const)("Review 第 %i 次不通过后阶段是 %s", (fails, phase) => {
     let state = reachReview(initialLoopState(1));
     for (let i = 0; i < fails; i++) {
@@ -51,7 +50,7 @@ describe("cursor-dev-loop", () => {
 
   it("手动放行后再次不通过仍然暂停", () => {
     let state = reachReview(initialLoopState(1));
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 15; i++) {
       state = nextLoop(state, { type: "review", pass: false }, cfg).state;
       state = nextLoop(state, { type: "stepOk" }, cfg).state;
       state = nextLoop(state, { type: "stepOk" }, cfg).state;
@@ -63,7 +62,7 @@ describe("cursor-dev-loop", () => {
     const again = nextLoop(nextLoop(continued.state, { type: "stepOk" }, cfg).state, { type: "stepOk" }, cfg);
     const second = nextLoop(again.state, { type: "review", pass: false }, cfg);
     expect(second.action.kind).toBe("waitInput");
-    expect(second.state.reviewRejects).toBe(5);
+    expect(second.state.reviewRejects).toBe(17);
   });
 
   it("上限用配置，超过上限后的暂停不能被额外开关关掉", () => {
@@ -95,7 +94,7 @@ describe("cursor-dev-loop", () => {
 
   it("人工继续、强制通过和终止", () => {
     let state = reachReview(initialLoopState(1));
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 16; i++) {
       const step = nextLoop(state, { type: "review", pass: false }, cfg);
       state = step.state;
       if (step.action.kind === "runStep") {
@@ -134,7 +133,7 @@ describe("cursor-dev-loop", () => {
 
   it("超限暂停可以继续修改或强制通过，推送失败可以重试 DevOps", () => {
     let state = reachReview(initialLoopState(1));
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 16; i++) {
       state = nextLoop(state, { type: "review", pass: false }, cfg).state;
       if (state.phase === "plan") {
         state = nextLoop(state, { type: "stepOk" }, cfg).state;

@@ -17,7 +17,7 @@ describe("收尾规则", () => {
     const saved = JSON.parse(JSON.stringify(created));
     snapshotConfig({ models: { develop: "composer-b" }, reviewRejectLimit: 9 });
     expect(saved.models.develop).toBe("composer-a");
-    expect(saved.reviewRejectLimit).toBe(3);
+    expect(saved.reviewRejectLimit).toBe(15);
   });
 
   it("节点模型修改不影响正在跑的那一步", () => {
