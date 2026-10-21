@@ -155,7 +155,7 @@ export const stepLabels: Record<StepId, string> = {
   qa: "QA",
 };
 
-export const rejectLimits = { review: 3 };
+export const rejectLimits = { review: 15 };
 
 export class ApiError extends Error {
   constructor(
