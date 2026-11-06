@@ -108,7 +108,13 @@ export function stepModel(
 ): string {
   if (step === "develop" && workspace.develop_model) return workspace.develop_model;
   if (step === "review") return workspace.review_model || fallback.reviewModel || fallback.model;
+  if (step === "plan" && isAliasModel(fallback.model) && workspace.develop_model) return workspace.develop_model;
   return fallback.model;
+}
+
+function isAliasModel(model: string): boolean {
+  const id = model.trim().toLowerCase();
+  return id === "auto" || id === "default";
 }
 
 export class Dispatcher {

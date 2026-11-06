@@ -6,7 +6,7 @@ import { classifyCursorFailure, mapCursorEvent, modelSelection, type CursorStrea
 
 export type CursorRun = {
   stream: () => AsyncIterable<CursorStreamEvent>;
-  wait: () => Promise<{ status: "finished" | "error" | "cancelled" }>;
+  wait: () => Promise<{ status: "finished" | "error" | "cancelled"; error?: { message?: string } }>;
   cancel: () => Promise<void>;
 };
 
@@ -66,7 +66,7 @@ export function createCursorRuntime(sdk: CursorSdk): AgentRuntime {
         const result = await run.wait();
         signal?.removeEventListener("abort", onAbort);
         if (result.status === "error") {
-          emit({ type: "error", message: "run failed" });
+          emit({ type: "error", message: result.error?.message || "run failed" });
           return "error";
         }
         emit({ type: "done", status: result.status === "cancelled" ? "cancelled" : "finished" });

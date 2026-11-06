@@ -23,6 +23,9 @@ describe("步骤模型", () => {
     expect(stepModel("develop", workspace, fallback)).toBe("ws-dev");
     expect(stepModel("review", workspace, fallback)).toBe("ws-review");
     expect(stepModel("plan", workspace, fallback)).toBe("global-dev");
+    expect(stepModel("plan", workspace, { model: "auto" })).toBe("ws-dev");
+    expect(stepModel("plan", workspace, { model: "default" })).toBe("ws-dev");
+    expect(stepModel("plan", { develop_model: "" }, { model: "auto" })).toBe("auto");
     expect(stepModel("qa", workspace, fallback)).toBe("global-dev");
     expect(stepModel("devops", { develop_model: "", review_model: "" }, fallback)).toBe("global-dev");
     expect(stepModel("develop", { develop_model: "" }, fallback)).toBe("global-dev");

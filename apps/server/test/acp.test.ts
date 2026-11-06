@@ -1,7 +1,10 @@
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayEvent } from "@gateway/shared";
-import { acpErrorText, acpInitializeParams, agentCandidates, createAcpRuntime, permissionChoice, recallPrompt, routeCursorRuntime, type AcpIncoming, type AcpLink } from "../src/providers/acp.js";
+import { acpErrorText, acpInitializeParams, agentCandidates, createAcpRuntime, ensureKeepAuthPreload, permissionChoice, recallPrompt, resolveCursorNode, routeCursorRuntime, withAgentNodeOptions, type AcpIncoming, type AcpLink } from "../src/providers/acp.js";
 import { mergeTodos } from "../src/providers/plan-doc.js";
 import type { AgentRuntime } from "../src/runs.js";
 const session = {
@@ -455,6 +458,91 @@ describe("ACP 计划与权限", () => {
     ]);
     expect(link.calls[2]?.params).toMatchObject({ configId: "model", value: "composer" });
     expect(link.calls[3]?.params).toMatchObject({ configId: "effort", value: "high" });
+  });
+
+  it("找到较新的 Cursor 版本目录", () => {
+    const base = mkdtempSync(join(tmpdir(), "acp-root-"));
+    const root = join(base, "cursor-agent");
+    const older = join(root, "versions", "2026.1.2-aaaa");
+    const newer = join(root, "versions", "2026.01.28-bbbb");
+    const nodeName = process.platform === "win32" ? "node.exe" : "node";
+    for (const dir of [older, newer]) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, nodeName), "");
+      writeFileSync(join(dir, "index.js"), "");
+    }
+    expect(resolveCursorNode(join(root, "agent.cmd"), {}, root)).toEqual({
+      node: join(newer, nodeName),
+      index: join(newer, "index.js"),
+    });
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("没有 Cursor 安装目录时不猜测可执行文件", () => {
+    expect(resolveCursorNode("agent", { LOCALAPPDATA: join(tmpdir(), "missing-cursor-agent") }, tmpdir())).toBeNull();
+  });
+
+  it("预加载会留下 auth.json", () => {
+    const dir = mkdtempSync(join(tmpdir(), "acp-auth-"));
+    const auth = join(dir, "auth.json");
+    writeFileSync(auth, "{}");
+    const script = join(dir, "run.cjs");
+    writeFileSync(script, `require("fs").promises.unlink(process.argv[2]).then(() => process.exit(0), () => process.exit(1));\n`);
+    const result = spawnSync(process.execPath, ["--require", ensureKeepAuthPreload(), script, auth], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    expect(existsSync(auth)).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("带空格的预加载路径可以放进 NODE_OPTIONS", () => {
+    const dir = mkdtempSync(join(tmpdir(), "acp space "));
+    const file = join(dir, "keep.cjs");
+    writeFileSync(file, "process.env.ACP_KEEP_LOADED = '1';\n");
+    const env = withAgentNodeOptions(
+      { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT, PATHEXT: process.env.PATHEXT },
+      file,
+    );
+    const result = spawnSync(process.execPath, ["-e", "process.exit(process.env.ACP_KEEP_LOADED === '1' ? 0 : 2)"], { env, encoding: "utf8" });
+    expect(result.status).toBe(0);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("没有模型配置时仍发送问题，换模型才重新启动", async () => {
+    const opened: string[] = [];
+    const noModel = {
+      sessionId: "sess-2",
+      modes: { currentModeId: "ask", availableModes: [{ id: "ask", name: "Ask" }] },
+    };
+    const runtime = createAcpRuntime(async (model) => {
+      opened.push(model);
+      return scripted((method) => (method === "session/new" ? noModel : {}));
+    });
+    const base = { sessionId: "s", runId: "r", workspaceId: "w", prompt: "看看", cwd: "/", access: "chat" as const, chatMode: "ask" as const };
+    const first = await collect(runtime, { ...base, model: "grok-4.7" });
+    const second = await collect(runtime, { ...base, model: "grok-4.7" });
+    const third = await collect(runtime, { ...base, model: "composer" });
+    expect(first.status).toBe("finished");
+    expect(second.status).toBe("finished");
+    expect(third.status).toBe("finished");
+    expect(first.events.filter((event) => event.type === "error")).toEqual([]);
+    expect(opened).toEqual(["grok-4.7", "composer"]);
+  });
+
+  it("声明了模型切换时换模型不重新启动", async () => {
+    const opened: string[] = [];
+    const link = scripted((method) => (method === "session/new" ? session : {}));
+    const runtime = createAcpRuntime(async (model) => {
+      opened.push(model);
+      return link;
+    });
+    const base = { sessionId: "s", runId: "r", workspaceId: "w", prompt: "看看", cwd: "/", access: "chat" as const, chatMode: "ask" as const };
+    await collect(runtime, { ...base, model: "composer" });
+    await collect(runtime, { ...base, model: "grok-4.7" });
+    expect(opened).toEqual(["composer"]);
+    expect(link.calls.filter((call) => call.method === "session/set_config_option").map((call) => call.params)).toEqual([
+      expect.objectContaining({ configId: "model", value: "composer" }),
+      expect.objectContaining({ configId: "model", value: "grok-4.7" }),
+    ]);
   });
 
   it("聊天走 ACP，工作流仍走 SDK", async () => {

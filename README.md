@@ -153,3 +153,49 @@ tailscale serve --bg 3701
 - **睡眠**：电脑睡眠后服务也会停。需要常开的机器请在电源设置里关闭睡眠。
 - **只在登录后运行**：服务在你登录后才启动，因为 agent 需要你的登录环境。
 - **端口占用**：3701 或 3702 被占用时脚本会直接提示，先运行 `status` 或 `stop` 检查。
+
+## 防火墙
+
+Gateway 默认只监听 `127.0.0.1`。本机浏览器访问 `http://127.0.0.1:3701` 不经过防火墙。手机和其他电脑按上面的「手机访问」走 Tailscale Serve：Tailscale 在自己的网卡上接收 https，再转到本机 3701。要放行的是 Tailscale，把 3701、3702 暴露到局域网或公网没有必要。3702 只给本机上的 OpenCode 使用。
+
+调试时的 Vite（5173）同样只在本机，不用加防火墙规则。
+
+### Windows
+
+安装 Tailscale 时，入站选择「专用」网络。Tailscale 安装程序会自己写入站规则。手机打不开页面时，确认放行的是 `tailscaled.exe`，而不是按端口放行 3701：
+
+```powershell
+New-NetFirewallRule -DisplayName "Tailscale" -Direction Inbound -Program "$env:ProgramFiles\Tailscale\tailscaled.exe" -Action Allow -Profile Private
+```
+
+查看是不是已经有人把 Gateway 的端口放开了：
+
+```powershell
+Get-NetFirewallRule -Direction Inbound -Enabled True | ForEach-Object {
+  $port = $_ | Get-NetFirewallPortFilter
+  if ($port.LocalPort -in "3701","3702","5173") { $_ }
+} | Format-Table DisplayName, Profile, Action
+```
+
+有输出就删掉对应规则，例如：
+
+```powershell
+Remove-NetFirewallRule -DisplayName "TomsGateway"
+```
+
+`node.exe` 弹出「允许应用通过防火墙」时选取消。它只绑定了 `127.0.0.1`，不需要入站例外。
+
+### macOS
+
+打开「系统设置 > 网络 > 防火墙」，打开防火墙。保持「阻止所有传入连接」关闭，否则 Tailscale 无法连入。在「选项」里允许 Tailscale。
+
+也可以用命令：
+
+```bash
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setblockall off
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /Applications/Tailscale.app
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /Applications/Tailscale.app
+```
+
+安装目录下的 `node/bin/node` 如果弹出传入连接提示，选择不允许。完全磁盘访问权限和防火墙是两回事，磁盘权限见上面「本地运行需要注意」。

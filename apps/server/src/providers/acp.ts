@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
 import type { GatewayEvent, PlanDocument } from "@gateway/shared";
 import type { AgentRuntime, RunContext, RunTerminal } from "../runs.js";
 import { toolDetail } from "./map.js";
@@ -61,10 +62,12 @@ export function recallPrompt(history: string, prompt: string): string {
   return `下面是这条聊天之前的对话记录，原会话已无法恢复，仅供参考：\n\n${history}\n\n---\n\n本次问题：\n${prompt}`;
 }
 
-export function createAcpRuntime(open: () => Promise<AcpLink>): AgentRuntime & { close(): void } {
+export function createAcpRuntime(open: (model: string) => Promise<AcpLink>): AgentRuntime & { close(): void } {
   let link: AcpLink | null = null;
   let opening: Promise<AcpLink> | null = null;
   let generation = 0;
+  let openedFor = "";
+  let switches = false;
   let queue: Promise<unknown> = Promise.resolve();
 
   function drop() {
@@ -72,12 +75,16 @@ export function createAcpRuntime(open: () => Promise<AcpLink>): AgentRuntime & {
     link?.close();
     link = null;
     opening = null;
+    openedFor = "";
+    switches = false;
   }
 
-  async function connection(): Promise<AcpLink> {
-    if (link) return link;
+  async function connection(model: string): Promise<AcpLink> {
+    if (link && (switches || openedFor === model)) return link;
+    if (link) drop();
+    openedFor = model;
     const ticket = generation;
-    opening ??= open()
+    opening ??= open(model)
       .then((created) => {
         if (ticket !== generation) {
           created.close();
@@ -98,7 +105,9 @@ export function createAcpRuntime(open: () => Promise<AcpLink>): AgentRuntime & {
       drop();
     },
     async startRun(input, emit, signal) {
-      const run = queue.then(() => runTurn(connection, drop, input, emit, signal));
+      const run = queue.then(() => runTurn(connection, drop, (enabled) => {
+      switches = enabled;
+    }, input, emit, signal));
       queue = run.then(
         () => undefined,
         () => undefined,
@@ -141,7 +150,7 @@ export async function openCursorAcp(options: {
     const probed = await probeAgent(bin);
     if (probed.ok) {
       console.log(`Cursor ACP 已接上：${bin}`);
-      const runtime = createAcpRuntime(() => spawnAcpLink(bin, options.apiKey));
+      const runtime = createAcpRuntime((model) => spawnAcpLink(bin, options.apiKey, model));
       return { runtime, close: () => runtime.close() };
     }
     reasons.push(`${bin}：${probed.reason}`);
@@ -195,11 +204,100 @@ function spawnAgent(bin: string, args: string[], stdio: "ignore" | ["pipe", "pip
   });
 }
 
-async function spawnAcpLink(bin: string, apiKey: string): Promise<AcpLink> {
-  const child = spawnAgent(bin, ["--api-key", apiKey, "acp"], ["pipe", "pipe", "pipe"], {
-    ...process.env,
-    CURSOR_API_KEY: apiKey,
-  }) as ChildProcessWithoutNullStreams;
+// Cursor CLI 用 API key 登录后会写入 auth.json，接着又在“是否已登录”里把它删掉。
+// 令牌没了，ACP 进程会直接退出。拦住这次删除，后面的请求还能从文件里把令牌读回来。
+const keepAuthPreloadSource = `const fs = require("fs");
+const path = require("path");
+const unlink = fs.promises.unlink;
+fs.promises.unlink = function (target) {
+  const text = String(target);
+  if (text.endsWith(path.sep + "auth.json") || text.endsWith("/auth.json")) return Promise.resolve();
+  return unlink.apply(fs.promises, arguments);
+};
+`;
+
+export function ensureKeepAuthPreload(): string {
+  const file = join(tmpdir(), "toms-gateway-acp-keep-auth.cjs");
+  writeFileSync(file, keepAuthPreloadSource);
+  return file;
+}
+
+export function withAgentNodeOptions(env: NodeJS.ProcessEnv, preload: string): NodeJS.ProcessEnv {
+  const option = `--require ${quoteNodeOption(preload)}`;
+  const prior = env.NODE_OPTIONS?.trim();
+  return { ...env, NODE_OPTIONS: prior ? `${prior} ${option}` : option };
+}
+
+function quoteNodeOption(value: string): string {
+  const normalized = value.replaceAll("\\", "/");
+  if (!/[\s"]/.test(normalized)) return normalized;
+  return `"${normalized.replaceAll('"', '\\"')}"`;
+}
+
+const cursorVersionName = /^\d{4}\.\d{1,2}\.\d{1,2}-[a-f0-9]+$/;
+
+export function resolveCursorNode(
+  bin: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home = homedir(),
+): { node: string; index: string } | null {
+  const root = cursorAgentRoot(bin, env, home);
+  if (!root) return null;
+  let names: string[];
+  try {
+    names = readdirSync(join(root, "versions"));
+  } catch {
+    return null;
+  }
+  let best: { name: string; rank: number } | null = null;
+  for (const name of names) {
+    if (!cursorVersionName.test(name)) continue;
+    const rank = versionRank(name);
+    if (!best || rank > best.rank) best = { name, rank };
+  }
+  if (!best) return null;
+  const dir = join(root, "versions", best.name);
+  const node = join(dir, process.platform === "win32" ? "node.exe" : "node");
+  const index = join(dir, "index.js");
+  if (!existsSync(node) || !existsSync(index)) return null;
+  return { node, index };
+}
+
+function cursorAgentRoot(bin: string, env: NodeJS.ProcessEnv, home: string): string | null {
+  const parts = bin.split(/[\\/]/);
+  let at = -1;
+  for (let i = 0; i < parts.length; i++) if (parts[i].toLowerCase() === "cursor-agent") at = i;
+  if (at >= 0) return parts.slice(0, at + 1).join(sep);
+  if (!env.LOCALAPPDATA && process.platform !== "win32") return null;
+  return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "cursor-agent");
+}
+
+function versionRank(name: string): number {
+  const [year, month, day] = name.split("-")[0].split(".");
+  return Number(year) * 10000 + Number(month) * 100 + Number(day);
+}
+
+function acpArgs(apiKey: string, model: string): string[] {
+  const args = ["--api-key", apiKey];
+  if (model) args.push("--model", model);
+  args.push("acp");
+  return args;
+}
+
+async function spawnAcpLink(bin: string, apiKey: string, model: string): Promise<AcpLink> {
+  const preload = ensureKeepAuthPreload();
+  const env = { ...process.env, CURSOR_API_KEY: apiKey };
+  const args = acpArgs(apiKey, model);
+  const direct = resolveCursorNode(bin);
+  const child = (
+    direct
+      ? spawn(direct.node, ["--require", preload, direct.index, ...args], {
+          windowsHide: true,
+          stdio: ["pipe", "pipe", "pipe"],
+          env,
+        })
+      : spawnAgent(bin, args, ["pipe", "pipe", "pipe"], withAgentNodeOptions(env, preload))
+  ) as ChildProcessWithoutNullStreams;
   const link = new ProcessLink(child);
   await link.request("initialize", acpInitializeParams);
   await link.request("authenticate", { methodId: "cursor_login" });
@@ -207,15 +305,16 @@ async function spawnAcpLink(bin: string, apiKey: string): Promise<AcpLink> {
 }
 
 async function runTurn(
-  connection: () => Promise<AcpLink>,
+  connection: (model: string) => Promise<AcpLink>,
   drop: () => void,
+  noteSwitch: (enabled: boolean) => void,
   input: RunContext,
   emit: (event: GatewayEvent) => void,
   signal?: AbortSignal,
 ): Promise<RunTerminal> {
   let current: AcpLink;
   try {
-    current = await connection();
+    current = await connection(input.model);
   } catch (error) {
     emit({ type: "error", message: error instanceof Error ? error.message : "ACP 启动失败" });
     return "error";
@@ -349,21 +448,20 @@ async function runTurn(
 
     let options: unknown = session.configOptions;
     let modelOption = modelConfig(options);
-    if (!modelOption) {
-      emit({ type: "error", message: "ACP 没有声明模型切换" });
-      return "error";
-    }
-    if (input.model && modelOption.currentValue !== input.model) {
+    noteSwitch(Boolean(modelOption));
+    if (modelOption && input.model && modelOption.currentValue !== input.model) {
       const updated = await current.request("session/set_config_option", { sessionId, configId: modelOption.id, value: input.model });
       options = configOptionsFrom(updated) ?? options;
       modelOption = modelConfig(options) ?? modelOption;
     }
-    for (const param of input.modelParams ?? []) {
-      const option = configById(options).get(param.id);
-      if (!option || option.id === modelOption.id || option.currentValue === param.value) continue;
-      const updated = await current.request("session/set_config_option", { sessionId, configId: option.id, value: param.value });
-      options = configOptionsFrom(updated) ?? options;
-      modelOption = modelConfig(options) ?? modelOption;
+    if (modelOption) {
+      for (const param of input.modelParams ?? []) {
+        const option = configById(options).get(param.id);
+        if (!option || option.id === modelOption.id || option.currentValue === param.value) continue;
+        const updated = await current.request("session/set_config_option", { sessionId, configId: option.id, value: param.value });
+        options = configOptionsFrom(updated) ?? options;
+        modelOption = modelConfig(options) ?? modelOption;
+      }
     }
 
     const result = await current.request("session/prompt", {
@@ -429,6 +527,7 @@ class ProcessLink implements AcpLink {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private readonly listeners = new Set<(message: AcpIncoming) => void>();
+  private stderr = "";
   private closed = false;
 
   constructor(private readonly child: ChildProcessWithoutNullStreams) {
@@ -446,9 +545,15 @@ class ProcessLink implements AcpLink {
       }
       for (const listener of this.listeners) listener(message);
     });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      this.stderr = (this.stderr + chunk).slice(-2000);
+    });
     child.on("exit", () => {
       this.closed = true;
-      for (const waiter of this.pending.values()) waiter.reject(new Error("ACP 进程已退出"));
+      const detail = this.stderr.replace(/\u001b\[[0-9;]*m/g, "").trim();
+      const message = detail ? `ACP 进程已退出：${detail.slice(-300)}` : "ACP 进程已退出";
+      for (const waiter of this.pending.values()) waiter.reject(new Error(message));
       this.pending.clear();
     });
     child.on("error", (error) => {
