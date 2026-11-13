@@ -6,8 +6,10 @@ import { settingSourcesOf } from "../../cursor-sources.js";
 import { dbOpen, transaction } from "../../db.js";
 import { appendLog } from "../../logs.js";
 import { readonlyViolation, watchReadonly } from "../../providers/guard.js";
+import { resolveRuntimeModel } from "../../providers/map.js";
 import { latestPlanMarkdown } from "../../providers/plan-doc.js";
 import type { AgentRuntime, GatewayTool } from "../../runs.js";
+import { stepModel } from "./dispatcher.js";
 import { acceptRequirements } from "./split.js";
 
 export type SplitDraft = { sharedContext: string; cards: RequirementCard[] };
@@ -48,7 +50,7 @@ export class SplitRunner {
 
   constructor(
     private readonly db: DatabaseSync,
-    private readonly options: { logDir: string; runtime: () => AgentRuntime | null; model: string },
+    private readonly options: { logDir: string; runtime: () => AgentRuntime | null; model: string; reviewModel?: string },
   ) {}
 
   start(input: { workspaceId: string; prompt: string; chatSessionId?: string; model?: string }):
@@ -56,9 +58,7 @@ export class SplitRunner {
     | { ok: false; code: number; message: string } {
     const runtime = this.options.runtime();
     if (!runtime) return { ok: false, code: 501, message: "当前没有可用的 Cursor agent" };
-    const workspace = this.db.prepare("SELECT path, repos_json, cursor_setting_sources FROM workspaces WHERE id = ?").get(input.workspaceId) as
-      | { path: string; repos_json: string; cursor_setting_sources: string | null }
-      | undefined;
+    const workspace = this.workspace(input.workspaceId);
     if (!workspace) return { ok: false, code: 404, message: "workspace 不存在" };
     if (input.chatSessionId) {
       const chat = this.db.prepare("SELECT workspace_id FROM chat_sessions WHERE id = ?").get(input.chatSessionId) as
@@ -67,7 +67,9 @@ export class SplitRunner {
       if (!chat || chat.workspace_id !== input.workspaceId) return { ok: false, code: 400, message: "聊天不属于这个 workspace" };
     }
     const id = randomUUID();
-    const model = input.model || this.options.model;
+    const model =
+      input.model ||
+      stepModel("review", workspace, { model: this.options.model, reviewModel: this.options.reviewModel });
     const now = Date.now();
     try {
       this.db
@@ -80,66 +82,41 @@ export class SplitRunner {
       return { ok: false, code: 409, message: "这个 workspace 已经有一个拆卡在进行中" };
     }
 
-    const file = splitLogFile(this.options.logDir, id);
-    const texts: string[] = [];
-    const controller = new AbortController();
-    const history = input.chatSessionId ? chatTranscript(this.db, this.options.logDir, input.chatSessionId) : "";
-    const plan = input.chatSessionId ? latestPlanMarkdown(this.db, input.chatSessionId) : "";
-    const prompt = [
-      splitTemplate,
-      history ? `## 聊天记录（背景）\n${history}` : "",
-      plan ? `## 已确认的计划\n${plan}` : "",
-      `## 用户的拆卡要求\n${input.prompt}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-    const done = (async () => {
-      const changed = await watchReadonly(JSON.parse(workspace.repos_json) as string[]);
-      let failure: string | null = null;
-      try {
-        const status = await runtime.startRun(
-          {
-            sessionId: `split:${id}`,
-            runId: id,
-            workspaceId: input.workspaceId,
-            prompt,
-            model,
-            cwd: workspace.path,
-            ...settingSourcesOf(workspace.cursor_setting_sources),
-            access: "split",
-            agentId: null,
-            onAgent: (agentId) => {
-              if (dbOpen(this.db)) this.db.prepare("UPDATE split_tasks SET agent_id = ? WHERE id = ?").run(agentId, id);
-            },
-            customTools: { submit_requirements: this.submitTool(id) },
-          },
-          (event) => {
-            if (event.type === "text") texts.push(event.text);
-            appendLog(file, event);
-          },
-          controller.signal,
-        );
-        if (status === "cancelled") failure = "已取消";
-        else if (status === "error") failure = "拆卡运行失败";
-      } catch {
-        failure = "拆卡运行失败";
-      } finally {
-        this.active.delete(id);
-      }
-      if (await changed()) appendLog(file, { type: "error", message: readonlyViolation });
-      if (!dbOpen(this.db)) return;
-      const row = this.load(id);
-      if (row?.status !== "running") return;
-      const fallback = parseDraftBlock(texts);
-      if (fallback) {
-        this.saveDraft(id, fallback);
-        return;
-      }
-      this.db
-        .prepare("UPDATE split_tasks SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
-        .run(failure ?? "agent 没有提交需求卡", Date.now(), id);
-    })();
-    this.active.set(id, { controller, done });
+    this.launch(runtime, workspace, { id, workspaceId: input.workspaceId, prompt: input.prompt, chatSessionId: input.chatSessionId ?? null, model });
+    return { ok: true, id };
+  }
+
+  retry(id: string): { ok: true; id: string } | { ok: false; code: number; message: string } {
+    const runtime = this.options.runtime();
+    if (!runtime) return { ok: false, code: 501, message: "当前没有可用的 Cursor agent" };
+    const row = this.load(id);
+    if (!row) return { ok: false, code: 404, message: "拆卡不存在" };
+    if (row.status !== "failed") return { ok: false, code: 409, message: "只有失败的拆卡可以重试" };
+    const workspace = this.workspace(row.workspace_id);
+    if (!workspace) return { ok: false, code: 404, message: "workspace 不存在" };
+    const model = stepModel("review", workspace, { model: this.options.model, reviewModel: this.options.reviewModel });
+    let updated = 0;
+    try {
+      updated = Number(
+        this.db
+          .prepare(
+            `UPDATE split_tasks
+           SET status = 'running', error = NULL, agent_id = NULL, draft_json = NULL, model = ?, updated_at = ?
+           WHERE id = ? AND status = 'failed'`,
+          )
+          .run(model, Date.now(), id).changes,
+      );
+    } catch {
+      return { ok: false, code: 409, message: "这个 workspace 已经有一个拆卡在进行中" };
+    }
+    if (updated !== 1) return { ok: false, code: 409, message: "只有失败的拆卡可以重试" };
+    this.launch(runtime, workspace, {
+      id,
+      workspaceId: row.workspace_id,
+      prompt: row.prompt,
+      chatSessionId: row.chat_session_id,
+      model,
+    });
     return { ok: true, id };
   }
 
@@ -186,6 +163,81 @@ export class SplitRunner {
 
   load(id: string): SplitTaskRow | undefined {
     return this.db.prepare("SELECT * FROM split_tasks WHERE id = ?").get(id) as SplitTaskRow | undefined;
+  }
+
+  private workspace(id: string) {
+    return this.db.prepare("SELECT path, repos_json, review_model, cursor_setting_sources FROM workspaces WHERE id = ?").get(id) as
+      | { path: string; repos_json: string; review_model: string | null; cursor_setting_sources: string | null }
+      | undefined;
+  }
+
+  private launch(
+    runtime: AgentRuntime,
+    workspace: { path: string; repos_json: string; cursor_setting_sources: string | null },
+    task: { id: string; workspaceId: string; prompt: string; chatSessionId: string | null; model: string },
+  ): void {
+    const file = splitLogFile(this.options.logDir, task.id);
+    const texts: string[] = [];
+    const controller = new AbortController();
+    const history = task.chatSessionId ? chatTranscript(this.db, this.options.logDir, task.chatSessionId) : "";
+    const plan = task.chatSessionId ? latestPlanMarkdown(this.db, task.chatSessionId) : "";
+    const prompt = [
+      splitTemplate,
+      history ? `## 聊天记录（背景）\n${history}` : "",
+      plan ? `## 已确认的计划\n${plan}` : "",
+      `## 用户的拆卡要求\n${task.prompt}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const done = (async () => {
+      const changed = await watchReadonly(JSON.parse(workspace.repos_json) as string[]);
+      let failure: string | null = null;
+      try {
+        const selection = await resolveRuntimeModel(runtime, task.model);
+        const status = await runtime.startRun(
+          {
+            sessionId: `split:${task.id}`,
+            runId: task.id,
+            workspaceId: task.workspaceId,
+            prompt,
+            model: selection.id,
+            ...(selection.params ? { modelParams: selection.params } : {}),
+            cwd: workspace.path,
+            ...settingSourcesOf(workspace.cursor_setting_sources),
+            access: "split",
+            agentId: null,
+            onAgent: (agentId) => {
+              if (dbOpen(this.db)) this.db.prepare("UPDATE split_tasks SET agent_id = ? WHERE id = ?").run(agentId, task.id);
+            },
+            customTools: { submit_requirements: this.submitTool(task.id) },
+          },
+          (event) => {
+            if (event.type === "text") texts.push(event.text);
+            appendLog(file, event);
+          },
+          controller.signal,
+        );
+        if (status === "cancelled") failure = "已取消";
+        else if (status === "error") failure = "拆卡运行失败";
+      } catch {
+        failure = "拆卡运行失败";
+      } finally {
+        this.active.delete(task.id);
+      }
+      if (await changed()) appendLog(file, { type: "error", message: readonlyViolation });
+      if (!dbOpen(this.db)) return;
+      const row = this.load(task.id);
+      if (row?.status !== "running") return;
+      const fallback = parseDraftBlock(texts);
+      if (fallback) {
+        this.saveDraft(task.id, fallback);
+        return;
+      }
+      this.db
+        .prepare("UPDATE split_tasks SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+        .run(failure ?? "agent 没有提交需求卡", Date.now(), task.id);
+    })();
+    this.active.set(task.id, { controller, done });
   }
 
   private submitTool(id: string): GatewayTool {

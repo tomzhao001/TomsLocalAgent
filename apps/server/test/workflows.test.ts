@@ -23,7 +23,10 @@ describe("工作流接口", () => {
     if (dir) await rm(dir, { recursive: true, force: true });
   });
 
-  async function start(runtimes?: Partial<Record<string, AgentRuntime>>) {
+  async function start(
+    runtimes?: Partial<Record<string, AgentRuntime>>,
+    models?: { workflowModel?: string; reviewModel?: string },
+  ) {
     dir = await mkdtemp(join(tmpdir(), "gw-wf-"));
     const root = join(dir, "root");
     await mkdir(join(root, "repo"), { recursive: true });
@@ -36,6 +39,8 @@ describe("工作流接口", () => {
       agentRuntime: runtimes ? undefined : "fake",
       runtimes,
       dispatchIntervalMs: 0,
+      workflowModel: models?.workflowModel,
+      reviewModel: models?.reviewModel,
     });
     const login = await app.inject({ method: "POST", url: "/api/login", payload: { password } });
     cookie = String(login.headers["set-cookie"]).split(";")[0] ?? "";
@@ -43,7 +48,7 @@ describe("工作流接口", () => {
     return ws.json().id as string;
   }
 
-  function authed(method: "GET" | "POST" | "DELETE", url: string, payload?: unknown) {
+  function authed(method: "GET" | "POST" | "PATCH" | "DELETE", url: string, payload?: unknown) {
     return app.inject({ method, url, headers: { cookie }, payload });
   }
 
@@ -216,6 +221,66 @@ describe("工作流接口", () => {
     expect(split.agent_id).toBe("split-agent");
     const log = (await authed("GET", `/api/splits/${split.id}/log?offset=0`)).json();
     expect(log.status).toBe("draft");
+  });
+
+  it("拆卡使用工作区的审核模型，并把变体字符串拆成模型 id 和参数", async () => {
+    const seen: { model: string; modelParams?: { id: string; value: string }[] }[] = [];
+    const runtime: AgentRuntime = {
+      async startRun(input, emit) {
+        seen.push({ model: input.model, ...(input.modelParams ? { modelParams: input.modelParams } : {}) });
+        await input.customTools!.submit_requirements!.execute({ sharedContext: "背景", cards: [card("好卡")] });
+        emit({ type: "done", status: "finished" });
+        return "finished";
+      },
+    };
+    const stored = "grok-4.7[context=256k,reasoning_effort=xhigh,fast=false]";
+    const ws = await start({ cursor: runtime }, { workflowModel: "dev-model", reviewModel: "env-review" });
+    const saved = await authed("PATCH", `/api/workspaces/${ws}`, { reviewModel: stored });
+    expect(saved.statusCode).toBe(200);
+    const started = await authed("POST", `/api/workspaces/${ws}/splits`, { prompt: "拆一下" });
+    const split = await waitSplit(started.json().id, "draft");
+    expect(split.model).toBe(stored);
+    expect(seen).toEqual([
+      {
+        model: "grok-4.7",
+        modelParams: [
+          { id: "context", value: "256k" },
+          { id: "reasoning_effort", value: "xhigh" },
+          { id: "fast", value: "false" },
+        ],
+      },
+    ]);
+  });
+
+  it("失败的拆卡可以原样重试，进行中的不能重试", async () => {
+    const prompts: string[] = [];
+    let fail = true;
+    const runtime: AgentRuntime = {
+      async startRun(input, emit) {
+        prompts.push(input.prompt);
+        if (fail) {
+          emit({ type: "error", message: "run failed" });
+          return "error";
+        }
+        await input.customTools!.submit_requirements!.execute({ sharedContext: "背景", cards: [card("好卡")] });
+        emit({ type: "done", status: "finished" });
+        return "finished";
+      },
+    };
+    const ws = await start({ cursor: runtime });
+    const started = await authed("POST", `/api/workspaces/${ws}/splits`, { prompt: "原来的拆卡要求\n第二行" });
+    const failed = await waitSplit(started.json().id, "failed");
+    const blocked = await authed("POST", `/api/splits/${failed.id}/confirm`, { sharedContext: "x", cards: [card("好卡")] });
+    expect(blocked.statusCode).toBe(409);
+    const wrong = await authed("POST", `/api/splits/missing/retry`);
+    expect(wrong.statusCode).toBe(404);
+    fail = false;
+    const retried = await authed("POST", `/api/splits/${failed.id}/retry`);
+    expect(retried.statusCode).toBe(202);
+    const split = await waitSplit(failed.id, "draft");
+    expect(split.prompt).toBe("原来的拆卡要求\n第二行");
+    expect(prompts[1]).toContain("原来的拆卡要求");
+    expect((await authed("POST", `/api/splits/${failed.id}/retry`)).statusCode).toBe(409);
   });
 
   it("同一个 workspace 同时只能有一个拆卡，没交卡的拆卡标记失败", async () => {

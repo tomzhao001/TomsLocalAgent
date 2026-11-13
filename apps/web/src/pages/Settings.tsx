@@ -1,5 +1,5 @@
 import { Loader2, X } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ModelDialog } from "@/components/ModelDialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,9 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
   const [browsing, setBrowsing] = useState(false);
+  const [roots, setRoots] = useState<string[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   async function load() {
     const res = await fetch("/api/workspaces", { credentials: "include" });
@@ -59,6 +62,12 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
   useEffect(() => {
     let cancelled = false;
     void load();
+    void fetch("/api/workspaces/roots", { credentials: "include" })
+      .then(async (res) => {
+        const body = (await res.json().catch(() => ({}))) as { roots?: unknown };
+        if (!cancelled && res.ok && Array.isArray(body.roots)) setRoots(body.roots.filter((item) => typeof item === "string"));
+      })
+      .catch(() => {});
     setModelsLoading(true);
     void fetch("/api/providers/cursor/models", { credentials: "include" })
       .then(async (res) => {
@@ -74,11 +83,26 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
     };
   }, []);
 
-  async function browse() {
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [menuOpen]);
+
+  async function browse(root?: string) {
+    setMenuOpen(false);
     setError("");
     setBrowsing(true);
     try {
-      const res = await fetch("/api/workspaces/browse", { method: "POST", credentials: "include" });
+      const res = await fetch("/api/workspaces/browse", {
+        method: "POST",
+        credentials: "include",
+        headers: root ? { "content-type": "application/json" } : undefined,
+        body: root ? JSON.stringify({ root }) : undefined,
+      });
       const body = (await res.json().catch(() => ({}))) as { path?: string | null; message?: string };
       if (!res.ok) {
         setError(body.message ?? "无法打开目录选择");
@@ -178,9 +202,42 @@ export function SettingsPage({ onChanged }: { onChanged?: () => void }) {
                   placeholder="本机任意已有目录"
                   required
                 />
-                <Button type="button" variant="outline" disabled={browsing} onClick={() => void browse()}>
-                  {browsing ? "选择中" : "浏览"}
-                </Button>
+                <div className="relative" ref={menuRef}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={browsing}
+                    aria-expanded={roots.length > 1 ? menuOpen : undefined}
+                    aria-haspopup={roots.length > 1 ? "menu" : undefined}
+                    onClick={() => {
+                      if (roots.length > 1) {
+                        setMenuOpen((open) => !open);
+                        return;
+                      }
+                      void browse();
+                    }}
+                  >
+                    {browsing ? "选择中" : "浏览"}
+                  </Button>
+                  {menuOpen ? (
+                    <div
+                      role="menu"
+                      className="absolute right-0 z-20 mt-1 min-w-48 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border bg-background p-1 shadow-md"
+                    >
+                      {roots.map((root) => (
+                        <button
+                          key={root}
+                          type="button"
+                          role="menuitem"
+                          className="block w-full break-all rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                          onClick={() => void browse(root)}
+                        >
+                          {root}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
             <Button type="submit">添加</Button>
@@ -276,12 +333,15 @@ function ModelFields({
     <form className="grid gap-3 sm:grid-cols-3" onSubmit={(event) => void save(event)}>
       <ModelField label="聊天默认模型" value={chatModel} models={models} loading={modelsLoading} onChange={setChatModel} />
       <ModelField label="工作流开发默认模型" value={developModel} models={models} loading={modelsLoading} onChange={setDevelopModel} />
-      <div className="grid gap-2 sm:col-span-2 sm:grid-cols-[1fr_auto] sm:items-end">
-        <ModelField label="工作流 Review 默认模型" value={reviewModel} models={models} loading={modelsLoading} onChange={setReviewModel} />
-        <Button type="submit" size="sm" variant="outline" disabled={saving}>
-          {saving ? <Loader2 className="animate-spin" data-icon="inline-start" /> : null}
-          保存模型
-        </Button>
+      <div className="grid gap-2 sm:col-span-2">
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+          <ModelField label="审核与拆卡默认模型" value={reviewModel} models={models} loading={modelsLoading} onChange={setReviewModel} />
+          <Button type="submit" size="sm" variant="outline" disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" data-icon="inline-start" /> : null}
+            保存模型
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">拆卡使用这个模型。留空时，审核和拆卡都沿用环境变量里的 REVIEW_MODEL。</p>
       </div>
       <fieldset className="grid gap-2 sm:col-span-3">
         <legend className="text-sm font-medium">Cursor 配置层</legend>

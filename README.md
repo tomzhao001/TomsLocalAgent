@@ -39,8 +39,8 @@ pnpm --filter @gateway/web dev
 - `CURSOR_API_KEY`：设置后 Cursor 模式会连接真的 Cursor SDK
 - `OPENCODE_ENABLE=true`：启动 OpenCode 服务，端口是 `OPENCODE_PORT`（默认 3702）
 - `AGENT_RUNTIME=fake`：不调用真模型，方便看聊天、锁和工作流
-- `WORKFLOW_MODEL`：开发、DevOps 和拆卡使用的 Cursor 模型，默认 `auto`
-- `REVIEW_MODEL`：Review 使用的模型。留空则与 `WORKFLOW_MODEL` 相同
+- `WORKFLOW_MODEL`：开发和 DevOps 使用的 Cursor 模型，默认 `auto`
+- `REVIEW_MODEL`：Review 和拆卡使用的模型。留空则与 `WORKFLOW_MODEL` 相同。工作区里设置了审核模型时，审核和拆卡都用工作区的那个
 - `DISPATCH_INTERVAL_MS`：工作流调度的轮询间隔，默认 60000（每分钟一次）
 
 ## 聊天和工作流

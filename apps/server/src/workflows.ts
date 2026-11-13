@@ -168,6 +168,13 @@ export function registerWorkflows(
     return { featureId: result.featureId };
   });
 
+  app.post("/api/splits/:id/retry", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = splits.retry(id);
+    if (!result.ok) return reply.code(result.code).send({ error: "retry_failed", message: result.message });
+    return reply.code(202).send(splitDto(splits.load(result.id)!));
+  });
+
   app.post("/api/splits/:id/discard", async (request, reply) => {
     const { id } = request.params as { id: string };
     const result = splits.discard(id);

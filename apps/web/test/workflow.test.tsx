@@ -214,6 +214,36 @@ describe("节点状态", () => {
   });
 });
 
+describe("拆卡失败", () => {
+  it("用原来的拆卡重试", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "s1" }), { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn();
+    render(
+      <SplitTasks
+        splits={[
+          {
+            id: "s1",
+            chatSessionId: "chat-1",
+            prompt: "原来的拆卡要求\n第二行还在",
+            status: "failed",
+            draft: null,
+            error: "拆卡运行失败",
+            createdAt: 1,
+          },
+        ]}
+        onChanged={onChanged}
+      />,
+    );
+    expect(screen.getByText(/第二行还在/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/splits/s1/retry");
+    expect(init.method).toBe("POST");
+  });
+});
+
 describe("拆卡草稿", () => {
   it("编辑后确认，把卡片提交给确认接口", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ featureId: "f" }), { status: 200 }));

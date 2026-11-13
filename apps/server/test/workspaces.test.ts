@@ -26,7 +26,10 @@ describe("workspace", () => {
     if (dir) await rm(dir, { recursive: true, force: true });
   });
 
-  async function start(extra?: { pickDirectory?: () => Promise<string | null> }) {
+  async function start(extra?: {
+    pickDirectory?: (initialPath?: string) => Promise<string | null>;
+    workspaceRoots?: (base: { dir: string; root: string }) => string[] | Promise<string[]>;
+  }) {
     dir = await mkdtemp(join(tmpdir(), "gw-ws-"));
     const root = join(dir, "root");
     await mkdir(root, { recursive: true });
@@ -34,7 +37,7 @@ describe("workspace", () => {
       dbPath: join(dir, "gateway.db"),
       adminPassword: password,
       cookieSecure: true,
-      workspaceRoots: [root],
+      workspaceRoots: extra?.workspaceRoots ? await extra.workspaceRoots({ dir, root }) : [root],
       pickDirectory: extra?.pickDirectory,
     });
     const login = await app.inject({
@@ -85,6 +88,59 @@ describe("workspace", () => {
     const cancelled = await authed("POST", "/api/workspaces/browse");
     expect(cancelled.statusCode).toBe(200);
     expect(cancelled.json()).toEqual({ path: null });
+  });
+
+  it("只列出仍存在的 workspace root", async () => {
+    const root = await start({
+      workspaceRoots: async ({ dir, root }) => {
+        const other = join(dir, "other");
+        await mkdir(other);
+        return [root, other, join(dir, "missing"), root];
+      },
+    });
+    const res = await authed("GET", "/api/workspaces/roots");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().roots).toEqual([realpathSync(root), realpathSync(join(dir, "other"))]);
+  });
+
+  it("浏览定位到选中的 root，拒绝未配置的路径", async () => {
+    const calls: Array<string | undefined> = [];
+    const root = await start({
+      pickDirectory: async (initialPath) => {
+        calls.push(initialPath);
+        return null;
+      },
+      workspaceRoots: async ({ dir, root }) => {
+        const other = join(dir, "other");
+        await mkdir(other);
+        return [root, other];
+      },
+    });
+    const roots = (await authed("GET", "/api/workspaces/roots")).json().roots as string[];
+    const chosen = await authed("POST", "/api/workspaces/browse", { root: roots[1] });
+    expect(chosen.statusCode).toBe(200);
+    expect(chosen.json()).toEqual({ path: null });
+    expect(calls).toEqual([roots[1]]);
+
+    const outside = join(dir, "outside");
+    await mkdir(outside);
+    const rejected = await authed("POST", "/api/workspaces/browse", { root: outside });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().message).toMatch(/workspace root/);
+    expect(calls).toEqual([roots[1]]);
+  });
+
+  it("只有一个 root 时浏览直接从该目录开始", async () => {
+    const calls: Array<string | undefined> = [];
+    const root = await start({
+      pickDirectory: async (initialPath) => {
+        calls.push(initialPath);
+        return null;
+      },
+    });
+    const res = await authed("POST", "/api/workspaces/browse");
+    expect(res.statusCode).toBe(200);
+    expect(calls).toEqual([realpathSync(root)]);
   });
 
   it("拒绝相互包含的路径", async () => {

@@ -222,6 +222,18 @@ export function resolveStoredModel(models: ModelInfo[], stored: string): { id: s
   return modelSelection(parsed.id, matchVariant(model, parsed.params));
 }
 
+export async function resolveRuntimeModel(
+  runtime: { listModels?: () => Promise<ModelInfo[]> },
+  stored: string,
+): Promise<{ id: string; params?: ModelParam[] }> {
+  if (!runtime.listModels) return resolveStoredModel([], stored);
+  try {
+    return resolveStoredModel(await runtime.listModels(), stored);
+  } catch {
+    return resolveStoredModel([], stored);
+  }
+}
+
 function normalizeParams(model: ModelInfo | undefined, current: ModelParam[]): ModelParam[] {
   const parameters = model?.parameters ?? [];
   const next = parameters.flatMap((param) => {

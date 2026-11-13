@@ -21,7 +21,10 @@ type WorkspaceRow = {
 export function registerWorkspaces(
   app: FastifyInstance,
   db: DatabaseSync,
-  options?: { pickDirectory?: () => Promise<string | null> },
+  options?: {
+    pickDirectory?: (initialPath?: string) => Promise<string | null>;
+    workspaceRoots?: string[];
+  },
 ): void {
   app.get("/api/workspaces", async () => {
     return db
@@ -123,9 +126,24 @@ export function registerWorkspaces(
     return load(db, id);
   });
 
-  app.post("/api/workspaces/browse", async (_request, reply) => {
+  app.get("/api/workspaces/roots", async () => {
+    return { roots: availableRoots(options?.workspaceRoots ?? []) };
+  });
+
+  app.post("/api/workspaces/browse", async (request, reply) => {
+    const body = (request.body ?? {}) as { root?: unknown };
+    const roots = availableRoots(options?.workspaceRoots ?? []);
+    let initial: string | undefined;
+    if (typeof body.root === "string" && body.root.trim()) {
+      const normalized = normalizeWorkspacePath(body.root);
+      const match = normalized.ok ? roots.find((root) => samePath(root, normalized.path)) : undefined;
+      if (!match) return reply.code(400).send({ error: "invalid", message: "不是已配置的 workspace root" });
+      initial = match;
+    } else if (roots.length === 1) {
+      initial = roots[0];
+    }
     try {
-      const picked = await (options?.pickDirectory ?? pickDirectory)();
+      const picked = await (options?.pickDirectory ?? pickDirectory)(initial);
       if (!picked) return { path: null };
       const normalized = normalizeWorkspacePath(picked);
       if (!normalized.ok) return reply.code(400).send({ error: "invalid", message: normalized.message });
@@ -154,6 +172,28 @@ export function registerWorkspaces(
       title: body.title ?? null,
     });
   });
+}
+
+function availableRoots(roots: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const root of roots) {
+    const normalized = normalizeWorkspacePath(root);
+    if (!normalized.ok) continue;
+    const key = foldPath(normalized.path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized.path);
+  }
+  return result;
+}
+
+function samePath(left: string, right: string): boolean {
+  return foldPath(left) === foldPath(right);
+}
+
+function foldPath(value: string): string {
+  return process.platform === "win32" ? value.toLowerCase() : value;
 }
 
 function existingPaths(db: DatabaseSync, exceptId?: string): string[] {

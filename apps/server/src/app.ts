@@ -32,7 +32,7 @@ export type AppOptions = {
   dispatchIntervalMs?: number;
   workflowModel?: string;
   reviewModel?: string;
-  pickDirectory?: () => Promise<string | null>;
+  pickDirectory?: (initialPath?: string) => Promise<string | null>;
 };
 
 export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
@@ -58,7 +58,7 @@ export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
       reviewModel: options.reviewModel,
       intervalMs: options.dispatchIntervalMs,
     });
-    const splits = new SplitRunner(db, { logDir, runtime: workflowRuntime, model });
+    const splits = new SplitRunner(db, { logDir, runtime: workflowRuntime, model, reviewModel: options.reviewModel });
     app.decorate("dispatcher", dispatcher);
     app.decorate("splits", splits);
     app.addHook("onClose", async () => {
@@ -70,7 +70,10 @@ export async function buildApp(options?: AppOptions): Promise<FastifyInstance> {
       adminPassword: options.adminPassword,
       cookieSecure: options.cookieSecure !== false,
     });
-    await registerWorkspaces(app, db, { pickDirectory: options.pickDirectory });
+    await registerWorkspaces(app, db, {
+      pickDirectory: options.pickDirectory,
+      workspaceRoots: options.workspaceRoots,
+    });
     registerGitBranches(app, db);
     registerRuns(app, db, { logDir, locks, runtime, runtimes: options.runtimes });
     registerWorkflows(app, db, { logDir, dispatcher, splits });

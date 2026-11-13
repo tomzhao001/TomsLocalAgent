@@ -16,32 +16,78 @@ export function normalizeWorkspacePath(input: string): { ok: true; path: string 
   return { ok: true, path: resolved };
 }
 
-export function pickDirectory(): Promise<string | null> {
+export function pickDirectory(initialPath?: string): Promise<string | null> {
+  const env = { ...process.env, GATEWAY_BROWSE_INITIAL: initialPath ?? "" };
   if (process.platform === "win32") {
-    return run("powershell.exe", ["-NoProfile", "-STA", "-Command", windowsPicker]);
+    return run("powershell.exe", ["-NoProfile", "-STA", "-Command", windowsPicker], env);
   }
   if (process.platform === "darwin") {
-    return run("osascript", ["-e", 'POSIX path of (choose folder with prompt "选择 workspace 目录")']);
+    return run("osascript", ["-e", macPicker], env);
   }
-  return run("zenity", ["--file-selection", "--directory", "--title=选择 workspace 目录"]);
+  const args = ["--file-selection", "--directory", "--title=选择 workspace 目录"];
+  if (initialPath) args.push(`--filename=${initialPath.endsWith("/") ? initialPath : `${initialPath}/`}`);
+  return run("zenity", args, env);
 }
 
 const windowsPicker = `
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class DialogForeground {
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr lpdwProcessId);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+}
+'@
 $owner = New-Object System.Windows.Forms.Form
 $owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+$owner.Width = 1
+$owner.Height = 1
+$owner.Show()
+$owner.Activate()
+$fg = [DialogForeground]::GetForegroundWindow()
+$fgThread = [DialogForeground]::GetWindowThreadProcessId($fg, [IntPtr]::Zero)
+$myThread = [DialogForeground]::GetCurrentThreadId()
+$attached = $false
+if ($fg -ne [IntPtr]::Zero -and $fgThread -ne 0 -and $fgThread -ne $myThread) {
+  $attached = [DialogForeground]::AttachThreadInput($myThread, $fgThread, $true)
+}
+[void][DialogForeground]::SetForegroundWindow($owner.Handle)
+$owner.Activate()
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = "选择 workspace 目录"
 $dialog.ShowNewFolderButton = $false
+$dialog.AutoUpgradeEnabled = $true
+$initial = $env:GATEWAY_BROWSE_INITIAL
+if ($initial -and (Test-Path -LiteralPath $initial -PathType Container)) {
+  $dialog.SelectedPath = $initial
+}
 if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::Out.WriteLine($dialog.SelectedPath)
+}
+if ($attached) {
+  [void][DialogForeground]::AttachThreadInput($myThread, $fgThread, $false)
 }
 $owner.Dispose()
 `;
 
-function run(command: string, args: string[]): Promise<string | null> {
+const macPicker = `
+set startPath to system attribute "GATEWAY_BROWSE_INITIAL"
+if startPath is not "" then
+  POSIX path of (choose folder with prompt "选择 workspace 目录" default location POSIX file startPath)
+else
+  POSIX path of (choose folder with prompt "选择 workspace 目录")
+end if
+`;
+
+function run(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true });
+    const child = spawn(command, args, { windowsHide: true, env });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {

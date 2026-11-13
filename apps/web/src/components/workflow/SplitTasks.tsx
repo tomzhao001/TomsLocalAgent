@@ -27,14 +27,36 @@ export function SplitTasks({ splits, onChanged }: { splits: SplitTask[]; onChang
 
 function SplitStatus({ split, onChanged }: { split: SplitTask; onChanged: () => void }) {
   const [showLog, setShowLog] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const running = split.status === "running";
+
+  async function retry() {
+    setError("");
+    setBusy(true);
+    try {
+      await api(`/api/splits/${split.id}/retry`, { method: "POST" });
+      onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "重试失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Alert variant={running ? "default" : "destructive"}>
       <AlertTitle>{running ? "拆卡中…" : "拆卡失败"}</AlertTitle>
       <AlertDescription className="flex flex-col gap-2">
-        <p className="line-clamp-2">{split.prompt}</p>
+        <p className="max-h-40 overflow-y-auto whitespace-pre-wrap wrap-break-word">{split.prompt}</p>
         {split.error ? <p>{split.error}</p> : null}
+        {error ? <p>{error}</p> : null}
         <div className="flex gap-2">
+          {running ? null : (
+            <Button type="button" size="xs" disabled={busy} onClick={() => void retry()}>
+              重试
+            </Button>
+          )}
           <Button type="button" size="xs" variant="outline" onClick={() => setShowLog((value) => !value)}>
             {showLog ? "收起日志" : "查看日志"}
           </Button>
@@ -42,6 +64,7 @@ function SplitStatus({ split, onChanged }: { split: SplitTask; onChanged: () => 
             type="button"
             size="xs"
             variant="ghost"
+            disabled={busy}
             onClick={() => void api(`/api/splits/${split.id}/discard`, { method: "POST" }).then(onChanged)}
           >
             {running ? "取消" : "清除"}
